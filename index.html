@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pilotage — Centres de prélèvement</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-inner">
+    <div>
+      <h1>Pilotage — Ouverture des centres de prélèvement</h1>
+      <p class="sub">CHR Verviers · Laboratoire · Décision Bureau Exécutif du 29/07/2026</p>
+    </div>
+    <div class="today-chip">
+      Aujourd'hui<br><b id="todayLabel">—</b>
+    </div>
+  </div>
+  <div class="tabs">
+    <button class="tab-btn active" data-view="overview">Vue d'ensemble</button>
+    <button class="tab-btn" data-view="planning">Planning</button>
+    <button class="tab-btn" data-view="tasks">Tâches</button>
+    <button class="tab-btn" data-view="orders">Commandes</button>
+    <button class="tab-btn" data-view="edit">Édition</button>
+  </div>
+</div>
+
+<main>
+
+  <div class="view active" id="view-overview">
+    <div class="banner"><span class="dot"></span> <span><b>Échéance Bureau Exécutif :</b> analyse de rentabilité + suivi des centres attendus pour le <b id="reportingDate">—</b>.</span></div>
+    <div class="grid-cards" id="overviewGrid"></div>
+  </div>
+
+  <div class="view" id="view-planning">
+    <div class="timeline-wrap">
+      <div class="tl-legend">
+        <span><i style="background:var(--red)"></i> Bloqué / prérequis</span>
+        <span><i style="background:var(--amber)"></i> À faire</span>
+        <span><i style="background:var(--blue)"></i> En cours</span>
+        <span><i style="background:var(--green)"></i> Fait</span>
+        <span><i style="background:var(--purple)"></i> Ouverture (jalon)</span>
+        <span>▮ Aujourd'hui</span>
+      </div>
+      <div id="tlRows"></div>
+      <div class="tl-months" id="tlMonths"></div>
+    </div>
+  </div>
+
+  <div class="view" id="view-tasks">
+    <div class="center-tabs" id="taskCenterTabs"></div>
+    <div class="center-meta" id="taskCenterMeta"></div>
+    <div class="kanban" id="kanbanBoard"></div>
+  </div>
+
+  <div class="view" id="view-orders">
+    <div class="center-tabs" id="orderCenterTabs"></div>
+    <div class="order-summary" id="orderSummary"></div>
+    <table class="orders">
+      <thead><tr><th>Poste</th><th>PU</th><th>Qté</th><th>Total</th><th>Fournisseur / réf.</th><th>Statut</th></tr></thead>
+      <tbody id="orderRows"></tbody>
+    </table>
+  </div>
+
+  <div class="view" id="view-edit">
+    <div class="banner" id="editSaveBanner"><span class="dot" style="background:var(--teal)"></span> <span id="editSaveStatus">Modifications enregistrées localement dans ce navigateur. Utilisez « Publier pour toute l'équipe » pour les partager.</span></div>
+    <div class="center-tabs" id="editCenterTabs"></div>
+    <div style="margin-bottom:18px;">
+      <button class="btn" id="btnAddCenter">+ Nouveau centre</button>
+      <button class="btn btn-publish" id="btnPublish">⇪ Publier pour toute l'équipe</button>
+      <button class="btn" id="btnDownload">⇩ Télécharger une copie (JSON)</button>
+      <button class="btn btn-danger" id="btnDeleteCenter">Supprimer ce centre</button>
+    </div>
+
+    <div class="edit-section">
+      <h3>Informations du centre</h3>
+      <div class="edit-grid" id="editCenterForm"></div>
+    </div>
+
+    <div class="edit-section">
+      <h3>Tâches <button class="btn btn-small" id="btnAddTask">+ Ajouter une tâche</button></h3>
+      <table class="edit-table" id="editTasksTable">
+        <thead><tr><th>Phase</th><th>Description</th><th>Responsable</th><th>Début</th><th>Fin</th><th>Statut</th><th>Jalon</th><th></th></tr></thead>
+        <tbody id="editTasksBody"></tbody>
+      </table>
+    </div>
+
+    <div class="edit-section">
+      <h3>Commandes / articles <button class="btn btn-small" id="btnAddOrder">+ Ajouter un article</button></h3>
+      <table class="edit-table" id="editOrdersTable">
+        <thead><tr><th>Poste</th><th>PU (€)</th><th>Qté</th><th>Fournisseur / réf.</th><th>Délai (sem.)</th><th>Statut</th><th></th></tr></thead>
+        <tbody id="editOrdersBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <span id="storageModeLabel"></span> <strong id="syncStatus"></strong> Les dates sont indicatives — ajustez les statuts au fil de l'avancement réel.
+</footer>
+<script src="app.js"></script>
+</body>
+</html>
