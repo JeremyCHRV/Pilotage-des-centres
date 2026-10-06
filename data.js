@@ -37,7 +37,13 @@ export default async function handler(req, res) {
     if (!hasBlob) return res.status(404).json({ error: "no_blob" });
     try {
       const { blobs } = await list({ prefix: BLOB_PATHNAME, limit: 1 });
-      if (!blobs.length) return res.status(404).json({ error: "no_data_yet" });
+      if (!blobs.length) {
+        // Blob configuré mais encore vide : on sert les données de départ (data.json statique)
+        const proto = req.headers["x-forwarded-proto"] || "https";
+        const seed = await fetch(`${proto}://${req.headers.host}/data.json`, { cache: "no-store" });
+        if (!seed.ok) throw new Error("seed fetch failed: " + seed.status);
+        return res.status(200).json(await seed.json());
+      }
       const r = await fetch(blobs[0].url, { cache: "no-store" });
       if (!r.ok) throw new Error("blob fetch failed: " + r.status);
       const json = await r.json();
