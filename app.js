@@ -607,6 +607,7 @@ function schedulePush(){
   pushTimer = setTimeout(pushSilently, 800);
 }
 async function pushSilently(){
+  pushTimer = null;   // sinon le rafraîchissement automatique resterait bloqué après un premier envoi
   const el = document.getElementById("syncStatus");
   const send = pw => fetch(CONFIG.apiUrl,{method:"POST",headers:{"Content-Type":"application/json","X-Edit-Password":pw},body:JSON.stringify(DATA)});
   try{
@@ -618,7 +619,10 @@ async function pushSilently(){
       if(res.ok) sessionStorage.setItem(CONFIG.editPasswordKey, pw);
     }
     if(res.ok){ LAST_JSON = JSON.stringify(DATA); if(el) el.textContent = "✓ Synchronisé " + new Date().toLocaleTimeString("fr-BE",{hour:"2-digit",minute:"2-digit"}); }
-    else if(el) el.textContent = "⚠ Changement non partagé (" + res.status + ")";
+    else{
+      const err = await res.json().catch(()=>({}));
+      if(el) el.textContent = "⚠ Changement non partagé (" + res.status + (err.message ? " — " + err.message : "") + ")";
+    }
   }catch(e){ if(el) el.textContent = "⚠ Changement non partagé (réseau)"; }
 }
 async function pollRemote(){
