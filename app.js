@@ -49,13 +49,22 @@ function normOrder(o){
   if(o.descriptif===undefined) o.descriptif="";
   if(o.fournisseur===undefined) o.fournisseur="";
   if(o.url===undefined) o.url="";
+  if(o.reference===undefined) o.reference="";
   delete o.info;
 }
 function esc(v){ return String(v==null?"":v).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
 function safeUrl(u){ u=(u||"").trim(); if(!u) return ""; if(!/^https?:\/\//i.test(u)) u="https://"+u; return u; }
+function mapsLink(a){ return "https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(a); }
+function addrHtml(c, withEmpty){
+  const a=(c.adresse||"").trim();
+  if(!a) return withEmpty? `<div class="addr empty">📍 Adresse à renseigner (onglet Édition)</div>` : "";
+  return `<div class="addr">📍 ${esc(a)} <a href="${esc(mapsLink(a))}" target="_blank" rel="noopener noreferrer">Voir sur la carte ↗</a></div>`;
+}
 function buildIndexes(){
   TASK_IDX = {}; ORDER_IDX = {};
   DATA.centers.forEach(c=>{
+    if(c.adresse===undefined) c.adresse="";
+    if(c.note===undefined) c.note="";
     c.tasks.forEach(t=>TASK_IDX[t.id]={c,t});
     c.orders.forEach(o=>{ normOrder(o); ORDER_IDX[o.id]={c,o}; });
   });
@@ -151,6 +160,7 @@ function renderOverview(){
       </div>
       <div class="progress-outer"><div class="progress-inner" style="width:${prog.pct}%"></div></div>
       <div class="budget-line"><span>${prog.done}/${prog.total} tâches faites</span><span>${eur(bud.engaged)} / ${eur(bud.total)} engagés</span></div>
+      ${addrHtml(c,true)}
       <div class="urgence ${hot?'hot':''}">${c.urgence}</div>
     `;
     grid.appendChild(el);
@@ -227,7 +237,7 @@ function renderTaskCenterTabs(){
 function renderKanban(){
   const c = DATA.centers.find(x=>x.id===activeTaskCenterId);
   const meta = document.getElementById("taskCenterMeta");
-  meta.innerHTML = `<b>${c.type}</b> · Lancement ${fmtFR(c.kickoff)} → Ouverture cible <b>${fmtFR(c.ouverture)}</b><br>${c.urgence}`;
+  meta.innerHTML = `<b>${c.type}</b> · Lancement ${fmtFR(c.kickoff)} → Ouverture cible <b>${fmtFR(c.ouverture)}</b><br>${c.urgence}${addrHtml(c,false)}`;
   const board = document.getElementById("kanbanBoard");
   const cols = [
     {key:"blocked", label:"Bloqué / prérequis"},
@@ -294,6 +304,8 @@ function renderOrders(){
     <div class="stat"><div class="n">${eur(engaged)}</div><div class="l">Engagé (commandé + livré)</div></div>
     <div class="stat"><div class="n">${livre}/${c.orders.length}</div><div class="l">Articles livrés</div></div>
   `;
+  const addrEl = document.getElementById("orderAddress");
+  if(addrEl){ const a=(c.adresse||"").trim(); addrEl.innerHTML = a ? `<b>Adresse de livraison :</b> ${esc(a)} <a href="${esc(mapsLink(a))}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:none;">Voir sur la carte ↗</a>` : `<b>Adresse de livraison :</b> <i>à renseigner dans l'onglet Édition</i>`; }
   const rows = document.getElementById("orderRows");
   rows.innerHTML = "";
   c.orders.forEach(o=>{
@@ -303,6 +315,7 @@ function renderOrders(){
     tr.innerHTML = `
       <td>${esc(o.poste)}${o.leadtime? `<span class="lt-badge">⚠ délai ${o.leadtime} sem.</span>`:""}</td>
       <td class="desc">${esc(o.descriptif)}</td>
+      <td>${esc(o.reference)}</td>
       <td>${esc(o.fournisseur)}</td>
       <td>${link? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">Ouvrir ↗</a>` : ""}</td>
       <td>${o.pu.toLocaleString("fr-BE",{minimumFractionDigits:2})} €</td>
@@ -329,8 +342,203 @@ function renderOrders(){
   });
   const totRow = document.createElement("tr");
   totRow.className = "tot-row";
-  totRow.innerHTML = `<td colspan="6">TOTAL</td><td>${eur(total)}</td><td></td>`;
+  totRow.innerHTML = `<td colspan="7">TOTAL</td><td>${eur(total)}</td><td></td>`;
   rows.appendChild(totRow);
+}
+
+/* ---------------- Résumé PDF (impression) ---------------- */
+const ST_COL = {todo:"#B4720A", doing:"#2262A8", done:"#1E8A4C", blocked:"#C6392F"};
+const ST_TXT = {todo:"À faire", doing:"En cours", done:"Fait", blocked:"Bloqué"};
+function toISO(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function addDays(s,n){ const d=parseISO(s); d.setDate(d.getDate()+n); return toISO(d); }
+function fmtLong(s){ return parseISO(s).toLocaleDateString("fr-BE",{day:"numeric",month:"long",year:"numeric"}); }
+function trunc(s,n){ s=String(s||""); return s.length>n ? s.slice(0,n-1)+"…" : s; }
+function isLate(t){ return t.status!=="done" && !t.milestone && parseISO(t.end) < TODAY; }
+
+function ganttSvgCenter(c){
+  const tasks = c.tasks.slice().sort((a,b)=>a.start.localeCompare(b.start)||a.end.localeCompare(b.end));
+  if(!tasks.length) return "";
+  const s0 = tasks.reduce((m,t)=>t.start<m?t.start:m, tasks[0].start);
+  const e0 = tasks.reduce((m,t)=>t.end>m?t.end:m, tasks[0].end);
+  const A = parseISO(s0), B = parseISO(addDays(e0,3));
+  const days = Math.max(1, diffDays(B,A));
+  const W=1000, L=340, RH=14, TOP=22, H=TOP+tasks.length*RH+6;
+  const X = d => L + (diffDays(d,A)/days)*(W-L);
+  let g = "";
+  tasks.forEach((t,i)=>{ if(i%2===0) g += `<rect x="0" y="${TOP+i*RH}" width="${W}" height="${RH}" fill="#F4F6F8"/>`; });
+  // lignes de semaine (lundis)
+  const d0 = new Date(A); while(d0.getDay()!==1) d0.setDate(d0.getDate()+1);
+  for(let d=new Date(d0); d<=B; d.setDate(d.getDate()+7)){
+    const x = X(d);
+    g += `<line x1="${x}" y1="${TOP-4}" x2="${x}" y2="${H-4}" stroke="#D5DBE1" stroke-width="0.6"/>`;
+    g += `<text x="${x+2}" y="${TOP-8}" font-size="8" fill="#5B6B7A">${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}</text>`;
+  }
+  tasks.forEach((t,i)=>{
+    const y = TOP+i*RH;
+    g += `<text x="6" y="${y+10.5}" font-size="8.5" fill="#1A2531">${esc(trunc(t.label.replace(/^⚠\s*/,""),66))}</text>`;
+    const xs = X(parseISO(t.start)), xe = X(parseISO(t.end));
+    if(t.milestone){
+      g += `<polygon points="${xs},${y+2} ${xs+7},${y+RH/2} ${xs},${y+RH-2} ${xs-7},${y+RH/2}" fill="#6C3FA8"/>`;
+    }else{
+      const late = isLate(t);
+      g += `<rect x="${xs}" y="${y+2.5}" width="${Math.max(3,xe-xs)}" height="${RH-5}" rx="2" fill="${ST_COL[t.status]||"#B4720A"}" ${late?'stroke="#C6392F" stroke-width="1.6" stroke-dasharray="3 1.5"':""}/>`;
+    }
+  });
+  if(TODAY>=A && TODAY<=B){
+    const x = X(TODAY);
+    g += `<line x1="${x}" y1="${TOP-4}" x2="${x}" y2="${H-4}" stroke="#C6392F" stroke-width="1.2" stroke-dasharray="4 2"/><text x="${x+3}" y="${H-1}" font-size="8" fill="#C6392F" font-weight="700">Aujourd'hui</text>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">${g}</svg>`;
+}
+
+function ganttSvgGlobal(){
+  const W=1000, L=230, RH=26, TOP=22, n=DATA.centers.length, H=TOP+n*RH+8;
+  const X = d => L + (diffDays(d,TL_START)/TOTAL_DAYS)*(W-L);
+  let g = "";
+  let m = new Date(TL_START.getFullYear(), TL_START.getMonth(), 1);
+  while(m < TL_END){
+    const x = Math.max(L, X(m));
+    g += `<line x1="${x}" y1="${TOP-4}" x2="${x}" y2="${H-4}" stroke="#D5DBE1" stroke-width="0.6"/><text x="${x+3}" y="${TOP-8}" font-size="9" fill="#5B6B7A">${m.toLocaleDateString("fr-BE",{month:"short",year:"2-digit"})}</text>`;
+    m = new Date(m.getFullYear(), m.getMonth()+1, 1);
+  }
+  DATA.centers.forEach((c,i)=>{
+    const y = TOP+i*RH;
+    if(i%2===0) g += `<rect x="0" y="${y}" width="${W}" height="${RH}" fill="#F4F6F8"/>`;
+    g += `<text x="6" y="${y+16}" font-size="10" font-weight="700" fill="#1A2531">${esc(trunc(c.nom,34))}</text>`;
+    c.tasks.forEach(t=>{
+      const xs = X(parseISO(t.start)), xe = X(parseISO(t.end));
+      if(t.milestone) g += `<polygon points="${xs},${y+3} ${xs+8},${y+RH/2} ${xs},${y+RH-3} ${xs-8},${y+RH/2}" fill="#6C3FA8"/>`;
+      else g += `<rect x="${Math.max(L,xs)}" y="${y+6}" width="${Math.max(2,xe-xs)}" height="${RH-12}" fill="${ST_COL[t.status]||"#B4720A"}" opacity="0.92"/>`;
+    });
+  });
+  if(TODAY>=TL_START && TODAY<=TL_END){
+    const x = X(TODAY);
+    g += `<line x1="${x}" y1="${TOP-4}" x2="${x}" y2="${H-4}" stroke="#C6392F" stroke-width="1.3" stroke-dasharray="4 2"/>`;
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">${g}</svg>`;
+}
+
+function centerNarrative(c){
+  const real = c.tasks.filter(t=>!t.milestone);
+  const cnt = k => real.filter(t=>t.status===k).length;
+  const prog = centerProgress(c), bud = centerBudget(c);
+  const days = diffDays(parseISO(c.ouverture), TODAY);
+  const lines = [];
+  lines.push(days>0 ? `Ouverture prévue le <b>${fmtLong(c.ouverture)}</b>, dans <b>${days} jour${days>1?"s":""}</b> (lancement le ${fmtLong(c.kickoff)}).`
+                    : `Ouverture prévue le <b>${fmtLong(c.ouverture)}</b> : date atteinte ou dépassée.`);
+  lines.push(`Avancement : <b>${prog.done} tâche${prog.done>1?"s":""} terminée${prog.done>1?"s":""} sur ${prog.total} (${prog.pct} %)</b> — ${cnt("doing")} en cours, ${cnt("todo")} à faire, ${cnt("blocked")} bloquée${cnt("blocked")>1?"s":""}. Phase actuelle : <b>${esc(centerPhaseNow(c))}</b>.`);
+  const oc = k => c.orders.filter(o=>o.status===k).length;
+  lines.push(`Commandes : ${oc("a_commander")} article${oc("a_commander")>1?"s":""} à commander, ${oc("commande")} commandé${oc("commande")>1?"s":""}, ${oc("livre")} livré${oc("livre")>1?"s":""} — <b>${eur(bud.engaged)}</b> engagés sur un budget de ${eur(bud.total)}.`);
+  const alerts = [];
+  c.tasks.filter(t=>t.status==="blocked").forEach(t=>alerts.push(`Bloqué : ${esc(t.label)} (${esc(t.resp||"—")}).`));
+  const late = c.tasks.filter(isLate);
+  late.forEach(t=>alerts.push(`En retard : ${esc(t.label.replace(/^⚠\s*/,""))} — échéance du ${fmtFR(t.end)} dépassée.`));
+  c.orders.filter(o=>o.leadtime && o.status==="a_commander").forEach(o=>{
+    const last = addDays(c.ouverture, -(7 + o.leadtime*7));
+    alerts.push(parseISO(last) < TODAY
+      ? `Délai fournisseur : « ${esc(o.poste)} » (${o.leadtime} sem.) n'est pas encore commandé et la date limite (${fmtFR(last)}) est dépassée — l'ouverture au ${fmtFR(c.ouverture)} est compromise sauf livraison accélérée.`
+      : `Délai fournisseur : commander « ${esc(o.poste)} » (${o.leadtime} sem.) au plus tard le <b>${fmtFR(last)}</b> pour tenir l'ouverture.`);
+  });
+  if((c.urgence||"").trim()) alerts.push(`Point de vigilance : ${esc(c.urgence)}`);
+  return {lines, alerts};
+}
+
+function taskListHtml(tasks, emptyMsg){
+  if(!tasks.length) return `<p class="empty">${emptyMsg}</p>`;
+  return `<ul>` + tasks.map(t=>`<li class="${isLate(t)?"late":""}"><span class="tl">${esc(t.label.replace(/^⚠\s*/,""))}</span><span class="tm">${esc(t.resp||"")} · ${t.milestone? fmtFR(t.start) : fmtFR(t.start)+" → "+fmtFR(t.end)}${isLate(t)?" · en retard":""}${t.status==="blocked"?" · bloqué":""}</span></li>`).join("") + `</ul>`;
+}
+
+function centerPageHtml(c){
+  const prog = centerProgress(c), pill = centerStatusPill(c), nar = centerNarrative(c);
+  const byDate = (a,b)=>a.start.localeCompare(b.start);
+  const done = c.tasks.filter(t=>t.status==="done").sort(byDate);
+  const doing = c.tasks.filter(t=>t.status==="doing").sort(byDate);
+  const todo = c.tasks.filter(t=>t.status==="todo"||t.status==="blocked").sort((a,b)=> (a.status==="blocked"?0:1)-(b.status==="blocked"?0:1) || byDate(a,b));
+  const addr = (c.adresse||"").trim();
+  return `<section class="page">
+    <div class="head"><div><h2>${esc(c.nom)}</h2><div class="sub">${esc(c.type)}${addr? " · 📍 "+esc(addr):""}</div></div>
+      <div class="badge"><b>${prog.pct} %</b><span>${esc(pill.label)}</span></div></div>
+    <div class="bar"><i style="width:${prog.pct}%"></i></div>
+    <div class="gantt">${ganttSvgCenter(c)}</div>
+    <div class="legend"><span><i style="background:${ST_COL.done}"></i>Fait</span><span><i style="background:${ST_COL.doing}"></i>En cours</span><span><i style="background:${ST_COL.todo}"></i>À faire</span><span><i style="background:${ST_COL.blocked}"></i>Bloqué</span><span><i class="dia"></i>Ouverture</span><span><i class="lt"></i>En retard</span></div>
+    <div class="cols">
+      <div class="explain"><h3>Explicatif</h3>${nar.lines.map(l=>`<p>${l}</p>`).join("")}
+        ${nar.alerts.length? `<h4>Points d'attention</h4><ul class="al">${nar.alerts.map(a=>`<li>${a}</li>`).join("")}</ul>`:""}
+        ${(c.note||"").trim()? `<h4>Commentaire</h4><p class="note">${esc(c.note).replace(/\n/g,"<br>")}</p>`:""}</div>
+      <div class="lists">
+        <h3 class="g">Fait (${done.length})</h3>${taskListHtml(done,"Aucune tâche terminée pour l'instant.")}
+        <h3 class="b">En cours (${doing.length})</h3>${taskListHtml(doing,"Aucune tâche en cours.")}
+        <h3 class="a">Reste à faire (${todo.length})</h3>${taskListHtml(todo,"Plus rien à faire.")}
+      </div>
+    </div>
+  </section>`;
+}
+
+function overviewPageHtml(centers){
+  const rows = centers.map(c=>{
+    const p = centerProgress(c), pill = centerStatusPill(c), b = centerBudget(c), d = diffDays(parseISO(c.ouverture), TODAY);
+    return `<tr><td><b>${esc(c.nom)}</b></td><td>${fmtFR(c.ouverture)}</td><td>${d>0? "J-"+d : "ouvert"}</td><td>${esc(pill.label)}</td><td>${p.done}/${p.total} (${p.pct} %)</td><td>${eur(b.engaged)} / ${eur(b.total)}</td></tr>`;
+  }).join("");
+  const tot = centers.reduce((s,c)=>{ const b=centerBudget(c); s.t+=b.total; s.e+=b.engaged; return s; },{t:0,e:0});
+  return `<section class="page">
+    <div class="head"><div><h2>Ouverture des centres de prélèvement — synthèse</h2><div class="sub">CHR Verviers · Laboratoire · situation au ${fmtLong(toISO(TODAY))}</div></div></div>
+    <div class="gantt">${ganttSvgGlobal()}</div>
+    <div class="legend"><span><i style="background:${ST_COL.done}"></i>Fait</span><span><i style="background:${ST_COL.doing}"></i>En cours</span><span><i style="background:${ST_COL.todo}"></i>À faire</span><span><i style="background:${ST_COL.blocked}"></i>Bloqué</span><span><i class="dia"></i>Ouverture</span><span><i class="td"></i>Aujourd'hui</span></div>
+    <table class="sum"><thead><tr><th>Centre</th><th>Ouverture</th><th>Échéance</th><th>Statut</th><th>Tâches</th><th>Budget engagé / total</th></tr></thead><tbody>${rows}
+      <tr class="tot"><td colspan="5">Total</td><td>${eur(tot.e)} / ${eur(tot.t)}</td></tr></tbody></table>
+  </section>`;
+}
+
+const REPORT_CSS = `
+  @page{ size:A4 landscape; margin:9mm; }
+  *{ box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{ font-family:Arial,Helvetica,sans-serif; color:#1A2531; margin:0; font-size:9px; }
+  .page{ page-break-after:always; break-after:page; }
+  .page:last-child{ page-break-after:auto; break-after:auto; }
+  .head{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px; }
+  h2{ margin:0; font-size:16px; color:#132B45; }
+  .sub{ color:#5B6B7A; font-size:10.5px; margin-top:2px; }
+  .badge{ text-align:right; } .badge b{ font-size:20px; color:#0E7C7B; display:block; line-height:1; } .badge span{ font-size:10px; color:#5B6B7A; }
+  .bar{ height:5px; background:#E8ECF0; border-radius:3px; overflow:hidden; margin-bottom:8px; } .bar i{ display:block; height:100%; background:#0E7C7B; }
+  .gantt{ border:1px solid #E2E6EA; border-radius:4px; padding:4px; margin-bottom:4px; }
+  .legend{ display:flex; gap:12px; font-size:8px; color:#5B6B7A; margin-bottom:6px; }
+  .legend i{ display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .legend i.dia{ background:#6C3FA8; transform:rotate(45deg); width:8px; height:8px; }
+  .legend i.lt{ background:#fff; border:1.5px dashed #C6392F; } .legend i.td{ background:#C6392F; width:2px; border-radius:0; }
+  .cols{ display:flex; gap:14px; align-items:flex-start; }
+  .explain{ width:36%; } .lists{ width:64%; columns:2; column-gap:12px; }
+  h3{ font-size:10.5px; margin:0 0 3px; color:#132B45; } h4{ font-size:9.5px; margin:6px 0 2px; color:#C6392F; }
+  h3.g{ color:#1E8A4C; } h3.b{ color:#2262A8; margin-top:6px; } h3.a{ color:#B4720A; margin-top:6px; }
+  .explain p{ margin:0 0 4px; line-height:1.35; font-size:9px; }
+  ul{ margin:0 0 3px; padding-left:12px; } li{ margin-bottom:2px; line-height:1.25; break-inside:avoid; font-size:9px; }
+  .tl{ display:block; } .tm{ display:block; color:#5B6B7A; font-size:7.5px; }
+  li.late .tl{ color:#C6392F; font-weight:700; }
+  ul.al li{ color:#7A2A22; } .empty{ color:#7A8794; font-style:italic; margin:0 0 4px; } .note{ background:#F4F6F8; padding:5px 7px; border-left:3px solid #0E7C7B; }
+  table.sum{ width:100%; border-collapse:collapse; margin-top:6px; font-size:10.5px; }
+  table.sum th{ background:#F4F6F8; text-align:left; padding:6px 8px; border-bottom:1px solid #D5DBE1; font-size:9.5px; }
+  table.sum td{ padding:6px 8px; border-bottom:1px solid #EEF1F4; } table.sum tr.tot td{ font-weight:700; background:#F4F6F8; }
+  .foot{ position:fixed; left:0; bottom:0; color:#8896A3; font-size:7.5px; }
+  .page{ padding-bottom:5mm; }
+`;
+
+function buildReportHtml(centers){
+  const title = "Avancement_centres_" + toISO(TODAY);
+  const pages = (centers.length>1 ? overviewPageHtml(centers) : "") + centers.map(centerPageHtml).join("");
+  return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>${title}</title><style>${REPORT_CSS}</style></head><body><div class="foot">Rapport généré le ${fmtLong(toISO(TODAY))} — Pilotage des centres de prélèvement, CHR Verviers.</div>${pages}</body></html>`;
+}
+
+function exportReportPdf(scope){
+  const centers = scope==="all" ? DATA.centers : DATA.centers.filter(c=>c.id===activeTaskCenterId);
+  if(!centers.length) return;
+  const html = buildReportHtml(centers);
+  const old = document.getElementById("reportFrame"); if(old) old.remove();
+  const fr = document.createElement("iframe");
+  fr.id = "reportFrame";
+  fr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+  document.body.appendChild(fr);
+  const doc = fr.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(()=>{ if(fr.contentWindow){ fr.contentWindow.focus(); fr.contentWindow.print(); } }, 350);
 }
 
 /* ---------------- Export Excel (bon de commande) ---------------- */
@@ -343,8 +551,8 @@ function exportOrders(scope){
   // Regroupement par fournisseur + article (quantités additionnées entre centres)
   const groups = {};
   detail.forEach(({c,o})=>{
-    const k = [o.fournisseur,o.poste,o.pu,o.url].join("|");
-    const g = groups[k] || (groups[k] = {fournisseur:o.fournisseur||"(sans fournisseur)", poste:o.poste, descriptif:o.descriptif, url:safeUrl(o.url), pu:o.pu, qty:0, leadtime:o.leadtime||"", centres:[]});
+    const k = [o.fournisseur,o.poste,o.reference,o.pu,o.url].join("|");
+    const g = groups[k] || (groups[k] = {fournisseur:o.fournisseur||"(sans fournisseur)", poste:o.poste, descriptif:o.descriptif, reference:o.reference||"", url:safeUrl(o.url), pu:o.pu, qty:0, leadtime:o.leadtime||"", centres:[]});
     g.qty += o.qty;
     const nom = c.nom.replace(/^\d+\.\s*/,"");
     if(!g.centres.includes(nom)) g.centres.push(nom);
@@ -352,13 +560,13 @@ function exportOrders(scope){
   });
   const list = Object.values(groups).sort((a,b)=> a.fournisseur.localeCompare(b.fournisseur,"fr") || a.poste.localeCompare(b.poste,"fr"));
 
-  const head1 = ["Fournisseur","Article","Descriptif","Lien URL","Qté","PU (€)","Total (€)","Délai (sem.)","Centres concernés"];
-  const rows1 = list.map((g,i)=>[g.fournisseur,g.poste,g.descriptif,g.url,g.qty,g.pu,{f:`E${i+2}*F${i+2}`,v:g.qty*g.pu},g.leadtime,g.centres.join(", ")]);
+  const head1 = ["Fournisseur","Article","Descriptif","Référence","Lien URL","Qté","PU (€)","Total (€)","Délai (sem.)","Centres concernés"];
+  const rows1 = list.map((g,i)=>[g.fournisseur,g.poste,g.descriptif,g.reference,g.url,g.qty,g.pu,{f:`F${i+2}*G${i+2}`,v:g.qty*g.pu},g.leadtime,g.centres.join(", ")]);
   const totalVal = list.reduce((s,g)=>s+g.qty*g.pu,0);
-  rows1.push(["TOTAL","","","","","",{f:`SUM(G2:G${list.length+1})`,v:totalVal},"",""]);
+  rows1.push(["TOTAL","","","","","","",{f:`SUM(H2:H${list.length+1})`,v:totalVal},"",""]);
 
-  const head2 = ["Centre","Fournisseur","Article","Descriptif","Lien URL","Qté","PU (€)","Total (€)","Délai (sem.)"];
-  const rows2 = detail.map(({c,o},i)=>[c.nom,o.fournisseur,o.poste,o.descriptif,safeUrl(o.url),o.qty,o.pu,{f:`F${i+2}*G${i+2}`,v:o.qty*o.pu},o.leadtime||""]);
+  const head2 = ["Centre","Fournisseur","Article","Descriptif","Référence","Lien URL","Qté","PU (€)","Total (€)","Délai (sem.)","Adresse de livraison"];
+  const rows2 = detail.map(({c,o},i)=>[c.nom,o.fournisseur,o.poste,o.descriptif,o.reference||"",safeUrl(o.url),o.qty,o.pu,{f:`G${i+2}*H${i+2}`,v:o.qty*o.pu},o.leadtime||"",c.adresse||""]);
 
   const today = new Date().toISOString().slice(0,10);
   const fname = `commande_${scope==="all"?"tous_centres":"centre_"+(centers[0].nom.replace(/^\d+\.\s*/,"").split(/[\s–-]/)[0].toLowerCase())}_${today}`;
@@ -382,8 +590,13 @@ function exportOrders(scope){
     return ws;
   };
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, mk(head1,rows1,[22,34,34,36,7,10,12,11,40],3,{5:'#,##0.00',6:'#,##0.00'}), "Bon de commande");
-  XLSX.utils.book_append_sheet(wb, mk(head2,rows2,[34,22,34,34,36,7,10,12,11],4,{6:'#,##0.00',7:'#,##0.00'}), "Détail par centre");
+  XLSX.utils.book_append_sheet(wb, mk(head1,rows1,[22,34,34,18,36,7,10,12,11,40],4,{6:'#,##0.00',7:'#,##0.00'}), "Bon de commande");
+  XLSX.utils.book_append_sheet(wb, mk(head2,rows2,[34,22,34,34,18,36,7,10,12,11,44],5,{7:'#,##0.00',8:'#,##0.00'}), "Détail par centre");
+  const cs = [...new Map(detail.map(({c})=>[c.id,c])).values()];
+  const ws3 = XLSX.utils.aoa_to_sheet([["Centre","Adresse de livraison","Plan"]].concat(cs.map(c=>[c.nom,c.adresse||"(à renseigner)", (c.adresse||"").trim()? mapsLink(c.adresse.trim()):""])));
+  ws3["!cols"] = [{wch:44},{wch:60},{wch:50}];
+  cs.forEach((c,i)=>{ const x = ws3[XLSX.utils.encode_cell({r:i+1,c:2})]; if(x && x.v) x.l = {Target:x.v}; });
+  XLSX.utils.book_append_sheet(wb, ws3, "Adresses de livraison");
   XLSX.writeFile(wb, fname+".xlsx");
 }
 
@@ -441,6 +654,8 @@ function renderEditor(){
       </select>`) +
     fieldRow("Date de lancement (kickoff)", `<input type="date" id="f-kickoff" value="${c.kickoff}">`) +
     fieldRow("Date d'ouverture cible", `<input type="date" id="f-ouverture" value="${c.ouverture}">`) +
+    fieldRow("Adresse du centre (rue, n°, code postal, commune)", `<input type="text" id="f-adresse" value="${esc(c.adresse)}" placeholder="Ex. : Rue Exemple 12, 4800 Verviers">`, true) +
+    fieldRow("Commentaire pour le résumé PDF (facultatif)", `<textarea id="f-note" placeholder="Contexte, décisions, prochaines étapes… repris dans le PDF d'avancement">${esc(c.note)}</textarea>`, true) +
     fieldRow("Point de vigilance / note affichée sur la carte", `<textarea id="f-urgence">${(c.urgence||"")}</textarea>`, true);
 
   const bind = (id, field, parser)=>{
@@ -448,7 +663,7 @@ function renderEditor(){
       const el = document.getElementById(id);
       c[field] = parser ? parser(el.value) : el.value;
       markDirty();
-      renderOverview(); renderPlanning();
+      renderOverview(); renderPlanning(); renderOrders(); renderKanban();
       renderEditCenterTabs(); // reflect renamed center in tab label
     });
   };
@@ -459,6 +674,8 @@ function renderEditor(){
   bind("f-kickoff","kickoff");
   bind("f-ouverture","ouverture");
   bind("f-urgence","urgence");
+  bind("f-adresse","adresse");
+  bind("f-note","note");
 
   // ---- Tasks table ----
   const tbody = document.getElementById("editTasksBody");
@@ -509,6 +726,7 @@ function renderEditor(){
     tr.innerHTML = `
       <td><input type="text" data-f="poste" value="${esc(o.poste)}" style="min-width:160px;"></td>
       <td><input type="text" data-f="descriptif" value="${esc(o.descriptif)}" style="min-width:160px;"></td>
+      <td><input type="text" data-f="reference" value="${esc(o.reference)}" style="min-width:100px;"></td>
       <td><input type="text" data-f="fournisseur" value="${esc(o.fournisseur)}" style="min-width:110px;"></td>
       <td><input type="text" data-f="url" class="url" value="${esc(o.url)}" placeholder="https://…"></td>
       <td><input type="number" step="0.01" data-f="pu" value="${o.pu}"></td>
@@ -587,11 +805,13 @@ function wireEditorButtons(){
   document.getElementById("btnAddOrder").addEventListener("click", ()=>{
     const c = DATA.centers.find(x=>x.id===activeEditCenterId);
     if(!c) return;
-    c.orders.push({ id: genId("o"), poste:"Nouvel article", descriptif:"", fournisseur:"", url:"", pu:0, qty:1, status:"a_commander", leadtime:null });
+    c.orders.push({ id: genId("o"), poste:"Nouvel article", descriptif:"", reference:"", fournisseur:"", url:"", pu:0, qty:1, status:"a_commander", leadtime:null });
     markDirty();
     renderEditor(); renderOrders();
   });
 
+  document.getElementById("btnPdfAll").addEventListener("click", ()=>exportReportPdf("all"));
+  document.getElementById("btnPdfCenter").addEventListener("click", ()=>exportReportPdf("center"));
   document.getElementById("btnExportCenter").addEventListener("click", ()=>exportOrders("center"));
   document.getElementById("btnExportAll").addEventListener("click", ()=>exportOrders("all"));
   document.getElementById("btnPublish").addEventListener("click", publishData);

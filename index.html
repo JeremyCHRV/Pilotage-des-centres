@@ -30,6 +30,7 @@
 
   <div class="view active" id="view-overview">
     <div class="banner"><span class="dot"></span> <span><b>Échéance Bureau Exécutif :</b> analyse de rentabilité + suivi des centres attendus pour le <b id="reportingDate">—</b>.</span></div>
+    <div class="export-bar"><button class="btn btn-publish" id="btnPdfAll">⇩ Résumé PDF de tous les centres</button><span class="export-hint">Synthèse, Gantt, ce qui est fait et ce qui reste à faire, centre par centre.</span></div>
     <div class="grid-cards" id="overviewGrid"></div>
   </div>
 
@@ -51,19 +52,21 @@
   <div class="view" id="view-tasks">
     <div class="center-tabs" id="taskCenterTabs"></div>
     <div class="center-meta" id="taskCenterMeta"></div>
+    <div class="export-bar"><button class="btn btn-publish" id="btnPdfCenter">⇩ Résumé PDF de ce centre</button></div>
     <div class="kanban" id="kanbanBoard"></div>
   </div>
 
   <div class="view" id="view-orders">
     <div class="center-tabs" id="orderCenterTabs"></div>
     <div class="order-summary" id="orderSummary"></div>
+    <div class="center-meta" id="orderAddress"></div>
     <div class="export-bar">
       <button class="btn btn-publish" id="btnExportCenter">⇩ Exporter ce centre (Excel)</button>
       <button class="btn btn-publish" id="btnExportAll">⇩ Exporter tous les centres (Excel)</button>
       <span class="export-hint">Seuls les articles « À commander » sont exportés, regroupés par fournisseur.</span>
     </div>
     <table class="orders">
-      <thead><tr><th>Article</th><th>Descriptif</th><th>Fournisseur</th><th>Lien</th><th>PU</th><th>Qté</th><th>Total</th><th>Statut</th></tr></thead>
+      <thead><tr><th>Article</th><th>Descriptif</th><th>Référence</th><th>Fournisseur</th><th>Lien</th><th>PU</th><th>Qté</th><th>Total</th><th>Statut</th></tr></thead>
       <tbody id="orderRows"></tbody>
     </table>
   </div>
@@ -94,7 +97,7 @@
     <div class="edit-section">
       <h3>Commandes / articles <button class="btn btn-small" id="btnAddOrder">+ Ajouter un article</button></h3>
       <table class="edit-table" id="editOrdersTable">
-        <thead><tr><th>Article</th><th>Descriptif</th><th>Fournisseur</th><th>Lien URL</th><th>PU (€)</th><th>Qté</th><th>Délai (sem.)</th><th>Statut</th><th></th></tr></thead>
+        <thead><tr><th>Article</th><th>Descriptif</th><th>Référence</th><th>Fournisseur</th><th>Lien URL</th><th>PU (€)</th><th>Qté</th><th>Délai (sem.)</th><th>Statut</th><th></th></tr></thead>
         <tbody id="editOrdersBody"></tbody>
       </table>
     </div>
