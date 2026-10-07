@@ -606,10 +606,78 @@ let isDirty = false;
 let genSeq = 1;
 function genId(prefix){ return prefix + Date.now().toString(36) + (genSeq++).toString(36); }
 
+let editSeq = 0, pushing = false;
 function markDirty(){
-  isDirty = true;
+  isDirty = true; editSeq++;
   const banner = document.getElementById("editSaveStatus");
-  if(banner) banner.textContent = "⚠ Modifications non publiées — cliquez sur « Publier pour toute l'équipe » pour les partager (ou téléchargez une copie de sauvegarde).";
+  if(DATA_SOURCE === "api"){
+    if(banner) banner.textContent = "⏳ Enregistrement automatique en cours…";
+    schedulePush();
+  }else if(banner){
+    banner.textContent = "⚠ Stockage partagé non actif : les modifications ne sont pas enregistrées. Téléchargez une copie (JSON) ou voir README, section 6.";
+  }
+}
+
+/* ---- Propagation des modifications vers tous les centres ---- */
+function propOn(){ const e = document.getElementById("chkPropAll"); return !!(e && e.checked); }
+function propDatesOn(){ const e = document.getElementById("chkPropDates"); return !!(e && e.checked); }
+function ensureGk(item){ if(!item.gk) item.gk = genId("g"); return item.gk; }
+function otherCenters(c){ return DATA.centers.filter(x=>x!==c); }
+function findTwin(list, item, field, oldKey){
+  if(item.gk){ const g = list.find(x=>x.gk===item.gk); if(g) return g; }
+  return list.find(x=>!x.gk && x[field]===oldKey) || list.find(x=>x[field]===oldKey);
+}
+function mapDate(src, dst, iso){
+  try{
+    const off = diffDays(parseISO(iso), parseISO(src.kickoff));
+    const sSpan = diffDays(parseISO(src.ouverture), parseISO(src.kickoff));
+    const dSpan = diffDays(parseISO(dst.ouverture), parseISO(dst.kickoff));
+    const ratio = sSpan > 0 && dSpan > 0 ? dSpan / sSpan : 1;
+    return addDays(dst.kickoff, Math.round(off * ratio));
+  }catch(e){ return iso; }
+}
+const TASK_SHARED = ["phase","label","resp","milestone"];
+const ORDER_SHARED = ["poste","descriptif","reference","fournisseur","url","pu","leadtime"];
+function propagateTaskEdit(c, t, f, oldLabel){
+  const isDate = (f==="start" || f==="end");
+  if(!(TASK_SHARED.includes(f) || (isDate && propDatesOn()))) return 0;
+  ensureGk(t);
+  let n = 0;
+  otherCenters(c).forEach(o=>{
+    const twin = findTwin(o.tasks, t, "label", oldLabel);
+    if(!twin) return;
+    twin.gk = t.gk;
+    twin[f] = isDate ? mapDate(c, o, t[f]) : t[f];
+    n++;
+  });
+  return n;
+}
+function propagateOrderEdit(c, od, f, oldPoste){
+  if(!ORDER_SHARED.includes(f)) return 0;
+  ensureGk(od);
+  let n = 0;
+  otherCenters(c).forEach(o=>{
+    const twin = findTwin(o.orders, od, "poste", oldPoste);
+    if(!twin) return;
+    twin.gk = od.gk;
+    twin[f] = od[f];
+    n++;
+  });
+  return n;
+}
+function loadPropPrefs(){
+  try{
+    const a = localStorage.getItem("pilotage-prop-all"), d = localStorage.getItem("pilotage-prop-dates");
+    const ca = document.getElementById("chkPropAll"), cd = document.getElementById("chkPropDates");
+    if(ca) ca.checked = a === null ? true : a === "1";
+    if(cd) cd.checked = d === "1";
+  }catch(e){}
+}
+function savePropPrefs(){
+  try{
+    localStorage.setItem("pilotage-prop-all", propOn() ? "1":"0");
+    localStorage.setItem("pilotage-prop-dates", propDatesOn() ? "1":"0");
+  }catch(e){}
 }
 function markClean(msg){
   isDirty = false;
@@ -703,13 +771,22 @@ function renderEditor(){
       const ev = inp.type==="checkbox" ? "change" : "input";
       inp.addEventListener(ev, ()=>{
         const f = inp.getAttribute("data-f");
+        const oldLabel = t.label;
         t[f] = inp.type==="checkbox" ? inp.checked : inp.value;
+        if(propOn()) propagateTaskEdit(c, t, f, oldLabel);
         markDirty();
-        renderOverview(); renderPlanning();
+        renderOverview(); renderPlanning(); renderKanban();
       });
     });
     tr.querySelector(".row-del").addEventListener("click", ()=>{
-      if(!confirm("Supprimer cette tâche ?")) return;
+      const all = propOn();
+      if(!confirm(all ? "Supprimer cette tâche dans TOUS les centres ?" : "Supprimer cette tâche (ce centre uniquement) ?")) return;
+      if(all){
+        otherCenters(c).forEach(o=>{
+          const twin = findTwin(o.tasks, t, "label", t.label);
+          if(twin){ o.tasks = o.tasks.filter(x=>x!==twin); delete TASK_IDX[twin.id]; }
+        });
+      }
       c.tasks = c.tasks.filter(x=>x!==t);
       delete TASK_IDX[t.id];
       markDirty();
@@ -745,16 +822,25 @@ function renderEditor(){
     tr.querySelectorAll("[data-f]").forEach(inp=>{
       inp.addEventListener("input", ()=>{
         const f = inp.getAttribute("data-f");
+        const oldPoste = o.poste;
         if(f==="pu") o.pu = parseFloat(inp.value)||0;
         else if(f==="qty") o.qty = parseInt(inp.value,10)||0;
         else if(f==="leadtime") o.leadtime = inp.value===""? null : parseInt(inp.value,10);
         else o[f] = inp.value;
+        if(propOn()) propagateOrderEdit(c, o, f, oldPoste);
         markDirty();
         renderOverview(); renderOrders();
       });
     });
     tr.querySelector(".row-del").addEventListener("click", ()=>{
-      if(!confirm("Supprimer cet article ?")) return;
+      const all = propOn();
+      if(!confirm(all ? "Supprimer cet article dans TOUS les centres ?" : "Supprimer cet article (ce centre uniquement) ?")) return;
+      if(all){
+        otherCenters(c).forEach(x=>{
+          const twin = findTwin(x.orders, o, "poste", o.poste);
+          if(twin){ x.orders = x.orders.filter(y=>y!==twin); delete ORDER_IDX[twin.id]; }
+        });
+      }
       c.orders = c.orders.filter(x=>x!==o);
       delete ORDER_IDX[o.id];
       markDirty();
@@ -797,24 +883,40 @@ function wireEditorButtons(){
     const c = DATA.centers.find(x=>x.id===activeEditCenterId);
     if(!c) return;
     const today = new Date().toISOString().slice(0,10);
-    c.tasks.push({ id: genId("t"), phase:"Nouvelle phase", label:"Nouvelle tâche", resp:"", start:today, end:today, status:"todo", milestone:false });
-    markDirty();
-    renderEditor(); renderKanban();
+    const nt = { id: genId("t"), phase:"Nouvelle phase", label:"Nouvelle tâche", resp:"", start:today, end:today, status:"todo", milestone:false };
+    c.tasks.push(nt);
+    if(propOn()){
+      ensureGk(nt);
+      otherCenters(c).forEach(o=>{
+        o.tasks.push({ ...nt, id: genId("t"), start: mapDate(c,o,nt.start), end: mapDate(c,o,nt.end) });
+      });
+    }
+    buildIndexes(); markDirty();
+    renderEditor(); renderKanban(); renderOverview(); renderPlanning();
   });
 
   document.getElementById("btnAddOrder").addEventListener("click", ()=>{
     const c = DATA.centers.find(x=>x.id===activeEditCenterId);
     if(!c) return;
-    c.orders.push({ id: genId("o"), poste:"Nouvel article", descriptif:"", reference:"", fournisseur:"", url:"", pu:0, qty:1, status:"a_commander", leadtime:null });
-    markDirty();
-    renderEditor(); renderOrders();
+    const no = { id: genId("o"), poste:"Nouvel article", descriptif:"", reference:"", fournisseur:"", url:"", pu:0, qty:1, status:"a_commander", leadtime:null };
+    c.orders.push(no);
+    if(propOn()){
+      ensureGk(no);
+      otherCenters(c).forEach(o=>{ o.orders.push({ ...no, id: genId("o") }); });
+    }
+    buildIndexes(); markDirty();
+    renderEditor(); renderOrders(); renderOverview();
   });
 
   document.getElementById("btnPdfAll").addEventListener("click", ()=>exportReportPdf("all"));
   document.getElementById("btnPdfCenter").addEventListener("click", ()=>exportReportPdf("center"));
   document.getElementById("btnExportCenter").addEventListener("click", ()=>exportOrders("center"));
   document.getElementById("btnExportAll").addEventListener("click", ()=>exportOrders("all"));
-  document.getElementById("btnPublish").addEventListener("click", publishData);
+  document.getElementById("btnPublish").addEventListener("click", ()=>{
+    if(DATA_SOURCE === "api"){ clearTimeout(pushTimer); pushSilently(); } else publishData();
+  });
+  loadPropPrefs();
+  ["chkPropAll","chkPropDates"].forEach(id=>document.getElementById(id).addEventListener("change", savePropPrefs));
   document.getElementById("btnDownload").addEventListener("click", downloadDataBackup);
 }
 
@@ -904,12 +1006,19 @@ function renderAll(){
 function schedulePush(){
   if(DATA_SOURCE !== "api") return;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(pushSilently, 800);
+  pushTimer = setTimeout(pushSilently, 900);
 }
-async function pushSilently(){
-  pushTimer = null;   // sinon le rafraîchissement automatique resterait bloqué après un premier envoi
+function nowHM(){ return new Date().toLocaleTimeString("fr-BE",{hour:"2-digit",minute:"2-digit"}); }
+async function pushSilently(keep){
+  clearTimeout(pushTimer); pushTimer = null;
+  if(DATA_SOURCE !== "api") return;
+  if(pushing){ schedulePush(); return; }
+  pushing = true;
+  const seq = editSeq;
   const el = document.getElementById("syncStatus");
-  const send = pw => fetch(CONFIG.apiUrl,{method:"POST",headers:{"Content-Type":"application/json","X-Edit-Password":pw},body:JSON.stringify(DATA)});
+  const banner = document.getElementById("editSaveStatus");
+  const body = JSON.stringify(DATA);
+  const send = pw => fetch(CONFIG.apiUrl,{method:"POST",keepalive: keep===true && body.length < 60000,headers:{"Content-Type":"application/json","X-Edit-Password":pw},body});
   try{
     let pw = sessionStorage.getItem(CONFIG.editPasswordKey) || "";
     let res = await send(pw);
@@ -918,27 +1027,44 @@ async function pushSilently(){
       res = await send(pw);
       if(res.ok) sessionStorage.setItem(CONFIG.editPasswordKey, pw);
     }
-    if(res.ok){ LAST_JSON = JSON.stringify(DATA); if(el) el.textContent = "✓ Synchronisé " + new Date().toLocaleTimeString("fr-BE",{hour:"2-digit",minute:"2-digit"}); }
-    else{
+    if(res.ok){
+      LAST_JSON = body;
+      if(el) el.textContent = "✓ Synchronisé " + nowHM();
+      if(seq === editSeq){ markClean("✓ Enregistré automatiquement à " + nowHM() + " — visible par toute l'équipe."); }
+    }else{
       const err = await res.json().catch(()=>({}));
-      if(el) el.textContent = "⚠ Changement non partagé (" + res.status + (err.message ? " — " + err.message : "") + ")";
+      const msg = "⚠ Changement non partagé (" + res.status + (err.message ? " — " + err.message : "") + ")";
+      if(el) el.textContent = msg;
+      if(banner && isDirty) banner.textContent = msg + " — nouvel essai à la prochaine modification.";
     }
-  }catch(e){ if(el) el.textContent = "⚠ Changement non partagé (réseau)"; }
+  }catch(e){
+    if(el) el.textContent = "⚠ Changement non partagé (réseau)";
+    if(banner && isDirty) banner.textContent = "⚠ Réseau indisponible — modifications non enregistrées, nouvel essai à la prochaine modification.";
+  }
+  pushing = false;
+  if(seq !== editSeq && isDirty) schedulePush();
+}
+function editorHasFocus(){
+  const a = document.activeElement, v = document.getElementById("view-edit");
+  return !!(a && v && v.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
 }
 async function pollRemote(){
-  if(DATA_SOURCE !== "api" || isDirty || pushTimer) return;
+  if(DATA_SOURCE !== "api" || isDirty || pushTimer || pushing || editorHasFocus()) return;
   try{
     const res = await fetch(CONFIG.apiUrl + "?t=" + Date.now(), {cache:"no-store"});
     if(!res.ok) return;
     const txt = JSON.stringify(await res.clone().json());
-    if(txt === LAST_JSON) return;
+    if(txt === LAST_JSON || isDirty || pushTimer || pushing) return;
     LAST_JSON = txt; DATA = JSON.parse(txt); renderAll();
     const el = document.getElementById("syncStatus");
-    if(el) el.textContent = "↻ Mis à jour " + new Date().toLocaleTimeString("fr-BE",{hour:"2-digit",minute:"2-digit"});
+    if(el) el.textContent = "↻ Mis à jour " + nowHM();
   }catch(e){ /* réseau indisponible : on réessaiera */ }
 }
 setInterval(pollRemote, 30000);
-document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) pollRemote(); });
+document.addEventListener("visibilitychange", ()=>{
+  if(document.hidden){ if(pushTimer || isDirty) pushSilently(true); }
+  else pollRemote();
+});
 
 async function init(){
   DATA = await loadData();

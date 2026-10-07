@@ -72,13 +72,19 @@
   </div>
 
   <div class="view" id="view-edit">
-    <div class="banner" id="editSaveBanner"><span class="dot" style="background:var(--teal)"></span> <span id="editSaveStatus">Modifications enregistrées localement dans ce navigateur. Utilisez « Publier pour toute l'équipe » pour les partager.</span></div>
+    <div class="banner" id="editSaveBanner"><span class="dot" style="background:var(--teal)"></span> <span id="editSaveStatus">Modifications enregistrées localement dans ce navigateur. Enregistrement automatique à chaque modification.</span></div>
     <div class="center-tabs" id="editCenterTabs"></div>
     <div style="margin-bottom:18px;">
       <button class="btn" id="btnAddCenter">+ Nouveau centre</button>
-      <button class="btn btn-publish" id="btnPublish">⇪ Publier pour toute l'équipe</button>
+      <button class="btn btn-publish" id="btnPublish">💾 Enregistrer maintenant</button>
       <button class="btn" id="btnDownload">⇩ Télécharger une copie (JSON)</button>
       <button class="btn btn-danger" id="btnDeleteCenter">Supprimer ce centre</button>
+    </div>
+
+    <div class="prop-box">
+      <label><input type="checkbox" id="chkPropAll" checked> Appliquer mes modifications d'articles et de tâches à <b>tous les centres</b> (ajout, suppression, texte, fournisseur, référence, prix…)</label>
+      <label><input type="checkbox" id="chkPropDates"> …y compris les <b>dates</b> des tâches (décalées selon le lancement et l'ouverture de chaque centre)</label>
+      <span class="export-hint">Les statuts et les quantités restent propres à chaque centre.</span>
     </div>
 
     <div class="edit-section">

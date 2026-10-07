@@ -168,3 +168,8 @@ paquet — il ne fonctionne que sur un hébergement qui exécute du code
 serveur (Vercel, Netlify Functions, etc.), pas sur un hébergement mutualisé
 classique en FTP pur. Sur ce type d'hébergement, seule l'édition locale +
 téléchargement de copie est disponible.
+
+
+## Enregistrement automatique et modifications pour tous les centres (v8)
+- Chaque modification dans l'onglet Édition est enregistrée automatiquement (~1 s) et partagée avec l'équipe (si le stockage partagé est actif).
+- Case « Appliquer à tous les centres » : article/tâche modifié, ajouté ou supprimé = répercuté sur tous les centres. Statuts et quantités restent propres à chaque centre. Les dates ne sont répercutées que si la 2e case est cochée.

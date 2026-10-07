@@ -204,3 +204,6 @@
   .addr a{color:var(--blue); text-decoration:none; margin-left:6px; white-space:nowrap;}
   .addr a:hover{text-decoration:underline;}
   .addr.empty{font-style:italic; opacity:.8;}
+
+.prop-box{background:#EAF4F4;border:1px solid #BFDCDC;border-radius:8px;padding:10px 14px;margin-bottom:18px;display:flex;flex-direction:column;gap:6px;font-size:13px;}
+.prop-box label{display:flex;gap:8px;align-items:flex-start;cursor:pointer;}
