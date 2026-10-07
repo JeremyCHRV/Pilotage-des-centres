@@ -57,8 +57,13 @@
   <div class="view" id="view-orders">
     <div class="center-tabs" id="orderCenterTabs"></div>
     <div class="order-summary" id="orderSummary"></div>
+    <div class="export-bar">
+      <button class="btn btn-publish" id="btnExportCenter">⇩ Exporter ce centre (Excel)</button>
+      <button class="btn btn-publish" id="btnExportAll">⇩ Exporter tous les centres (Excel)</button>
+      <span class="export-hint">Seuls les articles « À commander » sont exportés, regroupés par fournisseur.</span>
+    </div>
     <table class="orders">
-      <thead><tr><th>Poste</th><th>PU</th><th>Qté</th><th>Total</th><th>Fournisseur / réf.</th><th>Statut</th></tr></thead>
+      <thead><tr><th>Article</th><th>Descriptif</th><th>Fournisseur</th><th>Lien</th><th>PU</th><th>Qté</th><th>Total</th><th>Statut</th></tr></thead>
       <tbody id="orderRows"></tbody>
     </table>
   </div>
@@ -89,7 +94,7 @@
     <div class="edit-section">
       <h3>Commandes / articles <button class="btn btn-small" id="btnAddOrder">+ Ajouter un article</button></h3>
       <table class="edit-table" id="editOrdersTable">
-        <thead><tr><th>Poste</th><th>PU (€)</th><th>Qté</th><th>Fournisseur / réf.</th><th>Délai (sem.)</th><th>Statut</th><th></th></tr></thead>
+        <thead><tr><th>Article</th><th>Descriptif</th><th>Fournisseur</th><th>Lien URL</th><th>PU (€)</th><th>Qté</th><th>Délai (sem.)</th><th>Statut</th><th></th></tr></thead>
         <tbody id="editOrdersBody"></tbody>
       </table>
     </div>
@@ -100,6 +105,7 @@
 <footer>
   <span id="storageModeLabel"></span> <strong id="syncStatus"></strong> Les dates sont indicatives — ajustez les statuts au fil de l'avancement réel.
 </footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

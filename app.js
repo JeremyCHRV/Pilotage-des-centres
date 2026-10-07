@@ -34,11 +34,30 @@ let TODAY;
 
 let TASK_IDX = {};
 let ORDER_IDX = {};
+// Anciennes données : le champ "info" est séparé en fournisseur + descriptif.
+function normOrder(o){
+  if(o.fournisseur===undefined && o.descriptif===undefined){
+    const info=(o.info||"").trim();
+    let m=info.match(/^(.*?)\s*-\s*(Ecopostural)$/);
+    if(m){ o.fournisseur=m[2]; o.descriptif=m[1]; }
+    else{
+      m=info.match(/^(IKEA|Hubo|DE LONGHI|PHILIPS|Vistaprint|P&P)\b\s*(.*)$/);
+      o.fournisseur = m? m[1] : "";
+      o.descriptif = m? m[2].replace(/^[-–]\s*/,"") : info;
+    }
+  }
+  if(o.descriptif===undefined) o.descriptif="";
+  if(o.fournisseur===undefined) o.fournisseur="";
+  if(o.url===undefined) o.url="";
+  delete o.info;
+}
+function esc(v){ return String(v==null?"":v).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+function safeUrl(u){ u=(u||"").trim(); if(!u) return ""; if(!/^https?:\/\//i.test(u)) u="https://"+u; return u; }
 function buildIndexes(){
   TASK_IDX = {}; ORDER_IDX = {};
   DATA.centers.forEach(c=>{
     c.tasks.forEach(t=>TASK_IDX[t.id]={c,t});
-    c.orders.forEach(o=>ORDER_IDX[o.id]={c,o});
+    c.orders.forEach(o=>{ normOrder(o); ORDER_IDX[o.id]={c,o}; });
   });
 }
 
@@ -273,19 +292,22 @@ function renderOrders(){
   summary.innerHTML = `
     <div class="stat"><div class="n">${eur(total)}</div><div class="l">Budget total estimé</div></div>
     <div class="stat"><div class="n">${eur(engaged)}</div><div class="l">Engagé (commandé + livré)</div></div>
-    <div class="stat"><div class="n">${livre}/${c.orders.length}</div><div class="l">Postes livrés</div></div>
+    <div class="stat"><div class="n">${livre}/${c.orders.length}</div><div class="l">Articles livrés</div></div>
   `;
   const rows = document.getElementById("orderRows");
   rows.innerHTML = "";
   c.orders.forEach(o=>{
     const tr = document.createElement("tr");
     if(o.leadtime) tr.className = "leadtime";
+    const link = safeUrl(o.url);
     tr.innerHTML = `
-      <td>${o.poste}${o.leadtime? `<span class="lt-badge">⚠ délai ${o.leadtime} sem.</span>`:""}</td>
+      <td>${esc(o.poste)}${o.leadtime? `<span class="lt-badge">⚠ délai ${o.leadtime} sem.</span>`:""}</td>
+      <td class="desc">${esc(o.descriptif)}</td>
+      <td>${esc(o.fournisseur)}</td>
+      <td>${link? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">Ouvrir ↗</a>` : ""}</td>
       <td>${o.pu.toLocaleString("fr-BE",{minimumFractionDigits:2})} €</td>
       <td>${o.qty}</td>
       <td>${eur(o.pu*o.qty)}</td>
-      <td style="color:var(--text-mut); font-size:11.5px;">${o.info||""}</td>
       <td>
         <select data-id="${o.id}">
           <option value="a_commander" ${o.status==="a_commander"?"selected":""}>À commander</option>
@@ -307,8 +329,62 @@ function renderOrders(){
   });
   const totRow = document.createElement("tr");
   totRow.className = "tot-row";
-  totRow.innerHTML = `<td colspan="3">TOTAL</td><td>${eur(total)}</td><td colspan="2"></td>`;
+  totRow.innerHTML = `<td colspan="6">TOTAL</td><td>${eur(total)}</td><td></td>`;
   rows.appendChild(totRow);
+}
+
+/* ---------------- Export Excel (bon de commande) ---------------- */
+function exportOrders(scope){
+  const centers = scope==="all" ? DATA.centers : DATA.centers.filter(c=>c.id===activeOrderCenterId);
+  const detail = [];
+  centers.forEach(c=>c.orders.filter(o=>o.status==="a_commander").forEach(o=>detail.push({c,o})));
+  if(!detail.length){ alert("Aucun article « À commander » à exporter."); return; }
+
+  // Regroupement par fournisseur + article (quantités additionnées entre centres)
+  const groups = {};
+  detail.forEach(({c,o})=>{
+    const k = [o.fournisseur,o.poste,o.pu,o.url].join("|");
+    const g = groups[k] || (groups[k] = {fournisseur:o.fournisseur||"(sans fournisseur)", poste:o.poste, descriptif:o.descriptif, url:safeUrl(o.url), pu:o.pu, qty:0, leadtime:o.leadtime||"", centres:[]});
+    g.qty += o.qty;
+    const nom = c.nom.replace(/^\d+\.\s*/,"");
+    if(!g.centres.includes(nom)) g.centres.push(nom);
+    if(o.leadtime && !g.leadtime) g.leadtime = o.leadtime;
+  });
+  const list = Object.values(groups).sort((a,b)=> a.fournisseur.localeCompare(b.fournisseur,"fr") || a.poste.localeCompare(b.poste,"fr"));
+
+  const head1 = ["Fournisseur","Article","Descriptif","Lien URL","Qté","PU (€)","Total (€)","Délai (sem.)","Centres concernés"];
+  const rows1 = list.map((g,i)=>[g.fournisseur,g.poste,g.descriptif,g.url,g.qty,g.pu,{f:`E${i+2}*F${i+2}`,v:g.qty*g.pu},g.leadtime,g.centres.join(", ")]);
+  const totalVal = list.reduce((s,g)=>s+g.qty*g.pu,0);
+  rows1.push(["TOTAL","","","","","",{f:`SUM(G2:G${list.length+1})`,v:totalVal},"",""]);
+
+  const head2 = ["Centre","Fournisseur","Article","Descriptif","Lien URL","Qté","PU (€)","Total (€)","Délai (sem.)"];
+  const rows2 = detail.map(({c,o},i)=>[c.nom,o.fournisseur,o.poste,o.descriptif,safeUrl(o.url),o.qty,o.pu,{f:`F${i+2}*G${i+2}`,v:o.qty*o.pu},o.leadtime||""]);
+
+  const today = new Date().toISOString().slice(0,10);
+  const fname = `commande_${scope==="all"?"tous_centres":"centre_"+(centers[0].nom.replace(/^\d+\.\s*/,"").split(/[\s–-]/)[0].toLowerCase())}_${today}`;
+
+  if(typeof XLSX === "undefined"){
+    // Secours si la bibliothèque Excel n'a pas pu se charger : CSV lisible par Excel
+    const csv = [head2].concat(rows2.map(r=>r.map(v=> (v&&v.v!==undefined)? v.v : v))).map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(";")).join("\n");
+    const blob = new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = fname+".csv";
+    document.body.appendChild(a); a.click(); a.remove(); return;
+  }
+  const mk = (head, rows, widths, urlCol, numFmt)=>{
+    const ws = XLSX.utils.aoa_to_sheet([head].concat(rows));
+    ws["!cols"] = widths.map(w=>({wch:w}));
+    ws["!freeze"] = {xSplit:0,ySplit:1};
+    rows.forEach((r,i)=>{
+      const cell = ws[XLSX.utils.encode_cell({r:i+1,c:urlCol})];
+      if(cell && cell.v) cell.l = {Target:cell.v, Tooltip:"Ouvrir le lien"};
+      Object.entries(numFmt).forEach(([col,fmt])=>{ const x = ws[XLSX.utils.encode_cell({r:i+1,c:+col})]; if(x) x.z = fmt; });
+    });
+    return ws;
+  };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, mk(head1,rows1,[22,34,34,36,7,10,12,11,40],3,{5:'#,##0.00',6:'#,##0.00'}), "Bon de commande");
+  XLSX.utils.book_append_sheet(wb, mk(head2,rows2,[34,22,34,34,36,7,10,12,11],4,{6:'#,##0.00',7:'#,##0.00'}), "Détail par centre");
+  XLSX.writeFile(wb, fname+".xlsx");
 }
 
 /* ---------------- Édition (admin) ---------------- */
@@ -431,10 +507,12 @@ function renderEditor(){
   c.orders.forEach(o=>{
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><input type="text" data-f="poste" value="${(o.poste||"").replace(/"/g,'&quot;')}" style="min-width:180px;"></td>
+      <td><input type="text" data-f="poste" value="${esc(o.poste)}" style="min-width:160px;"></td>
+      <td><input type="text" data-f="descriptif" value="${esc(o.descriptif)}" style="min-width:160px;"></td>
+      <td><input type="text" data-f="fournisseur" value="${esc(o.fournisseur)}" style="min-width:110px;"></td>
+      <td><input type="text" data-f="url" class="url" value="${esc(o.url)}" placeholder="https://…"></td>
       <td><input type="number" step="0.01" data-f="pu" value="${o.pu}"></td>
       <td><input type="number" data-f="qty" value="${o.qty}"></td>
-      <td><input type="text" data-f="info" value="${(o.info||"").replace(/"/g,'&quot;')}"></td>
       <td><input type="number" data-f="leadtime" value="${o.leadtime==null?"":o.leadtime}" placeholder="—"></td>
       <td>
         <select data-f="status">
@@ -454,7 +532,7 @@ function renderEditor(){
         else if(f==="leadtime") o.leadtime = inp.value===""? null : parseInt(inp.value,10);
         else o[f] = inp.value;
         markDirty();
-        renderOverview();
+        renderOverview(); renderOrders();
       });
     });
     tr.querySelector(".row-del").addEventListener("click", ()=>{
@@ -509,11 +587,13 @@ function wireEditorButtons(){
   document.getElementById("btnAddOrder").addEventListener("click", ()=>{
     const c = DATA.centers.find(x=>x.id===activeEditCenterId);
     if(!c) return;
-    c.orders.push({ id: genId("o"), poste:"Nouvel article", pu:0, qty:1, info:"", status:"a_commander", leadtime:null });
+    c.orders.push({ id: genId("o"), poste:"Nouvel article", descriptif:"", fournisseur:"", url:"", pu:0, qty:1, status:"a_commander", leadtime:null });
     markDirty();
     renderEditor(); renderOrders();
   });
 
+  document.getElementById("btnExportCenter").addEventListener("click", ()=>exportOrders("center"));
+  document.getElementById("btnExportAll").addEventListener("click", ()=>exportOrders("all"));
   document.getElementById("btnPublish").addEventListener("click", publishData);
   document.getElementById("btnDownload").addEventListener("click", downloadDataBackup);
 }
