@@ -50,7 +50,7 @@ export default async function handler(req, res) {
       return res.status(200).json(json);
     } catch (e) {
       console.error("GET /api/data error", e);
-      return res.status(404).json({ error: "blob_unavailable" });
+      return res.status(404).json({ error: "blob_unavailable", detail: String((e && e.message) || e) });
     }
   }
 
