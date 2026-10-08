@@ -200,12 +200,48 @@ function assignLanes(tasks){
   return {lane, count: Math.max(1, ends.length)};
 }
 
+let planCenter = "all";
+try{ planCenter = localStorage.getItem("pilotage-plan-center") || "all"; }catch(e){}
+function moveCenter(id, dir){
+  const i = DATA.centers.findIndex(c=>c.id===id), j = i+dir;
+  if(i<0 || j<0 || j>=DATA.centers.length) return;
+  const arr = DATA.centers;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+  arr.forEach((c,k)=>{ c.priorite = k+1; });
+  markDirty(); renderAll();
+}
+function renderPlanTabs(){
+  const wrap = document.getElementById("planTabs");
+  if(!wrap) return;
+  wrap.innerHTML = "";
+  const mk = (id, label)=>{
+    const b = document.createElement("button");
+    b.className = "ctab" + (planCenter===id ? " active":"");
+    b.textContent = label;
+    b.onclick = ()=>{ planCenter = id; try{ localStorage.setItem("pilotage-plan-center", id); }catch(e){} renderPlanning(); };
+    wrap.appendChild(b);
+  };
+  mk("all","Tous les centres");
+  DATA.centers.forEach(c=>mk(c.id, c.nom));
+}
+
 function renderPlanning(){
   computeTimeline();
+  if(planCenter!=="all" && !DATA.centers.find(c=>c.id===planCenter)) planCenter = "all";
+  renderPlanTabs();
   const rows = document.getElementById("tlRows");
+  const monthsEl0 = document.getElementById("tlMonths");
   rows.innerHTML = "";
+  const single = planCenter!=="all" ? DATA.centers.find(c=>c.id===planCenter) : null;
+  if(single){
+    monthsEl0.style.display = "none";
+    const pill = centerStatusPill(single), prog = centerProgress(single);
+    rows.innerHTML = `<div class="tl-single-head"><b>${esc(single.nom)}</b> · ${pill.label} · lancement ${fmtFR(single.kickoff)} · ouverture ${fmtFR(single.ouverture)} · ${prog.done}/${prog.total} tâches faites (${prog.pct} %)</div>` + ganttSvgCenter(single);
+    return;
+  }
+  monthsEl0.style.display = "";
   const LH = 11;
-  DATA.centers.forEach(c=>{
+  DATA.centers.forEach((c,ci)=>{
     const pill = centerStatusPill(c);
     const row = document.createElement("div");
     row.className = "tl-row";
@@ -225,9 +261,11 @@ function renderPlanning(){
     segsHTML += `<div class="tl-milestone" style="left:${pct(c.ouverture)}%" title="Ouverture — ${fmtFR(c.ouverture)}"></div>`;
     const todayLeft = diffDays(TODAY, TL_START) / TOTAL_DAYS * 100;
     row.innerHTML = `
-      <div class="tl-label">${esc(c.nom)}<span class="st">${pill.label} · lancement ${fmtFR(c.kickoff)} · ouverture ${fmtFR(c.ouverture)}</span></div>
+      <div class="tl-label"><span class="mv"><button data-mv="-1" title="Monter">▲</button><button data-mv="1" title="Descendre">▼</button></span>${esc(c.nom)}<span class="st">${pill.label} · lancement ${fmtFR(c.kickoff)} · ouverture ${fmtFR(c.ouverture)}</span></div>
       <div class="tl-track" style="height:${count*LH+8}px">${segsHTML}${(todayLeft>=0&&todayLeft<=100)?`<div class="tl-today" style="left:${todayLeft}%"></div>`:""}</div>
     `;
+    row.querySelectorAll("[data-mv]").forEach(b=>b.addEventListener("click", e=>{ e.stopPropagation(); moveCenter(c.id, +b.dataset.mv); }));
+    row.querySelector(".tl-label").addEventListener("dblclick", ()=>{ planCenter = c.id; renderPlanning(); });
     rows.appendChild(row);
   });
   const monthsEl = document.getElementById("tlMonths");

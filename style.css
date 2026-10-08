@@ -229,3 +229,10 @@ th.sorted{color:#14414B;}
 .tl-kick{position:absolute;top:0;bottom:0;width:3px;background:var(--navy-2);z-index:4;border-radius:2px;}
 .tl-milestone{top:0 !important;bottom:0;height:auto !important;z-index:4;}
 .tl-track{min-height:26px;}
+
+.tl-label{position:relative;}
+.tl-label .mv{display:inline-flex;flex-direction:column;margin-right:6px;vertical-align:middle;}
+.tl-label .mv button{border:1px solid var(--line);background:#fff;color:var(--navy-2);font-size:8px;line-height:1;padding:1px 4px;cursor:pointer;border-radius:3px;}
+.tl-label .mv button:hover{background:#E3EEF0;}
+.tl-single-head{font-size:13px;color:var(--text-mut);margin-bottom:10px;}
+.tl-single-head b{color:var(--navy-2);}
