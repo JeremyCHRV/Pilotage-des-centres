@@ -218,3 +218,8 @@ tr.grp-row .grp-n{font-weight:400;color:#5B6B7A;font-size:12px;}
 .add-form{background:#F4F8F9;border:1px solid #BFDCDC;border-radius:8px;padding:12px 14px;margin:0 0 14px;}
 .add-form[hidden]{display:none;}
 .add-form h4{margin:0 0 8px;color:#14414B;}
+
+th.sortable{cursor:pointer;user-select:none;white-space:nowrap;}
+th.sortable:hover{background:#D5E6E9;}
+th.sortable::after{content:attr(data-arrow);color:#14414B;font-size:11px;}
+th.sorted{color:#14414B;}

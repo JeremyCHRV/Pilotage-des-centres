@@ -305,11 +305,62 @@ const CATS = [
 const CAT_BY = Object.fromEntries(CATS.map(c=>[c.k,c]));
 const OST = {a_commander:"À commander", commande:"Commandé", livre:"Livré", na:"Non nécessaire"};
 let activeOrderCat = "economat";
+/* ---- Tri par colonne ---- */
+let orderSort = {col:null, dir:1};
+function cmpVal(a,b){
+  if(typeof a==="number" && typeof b==="number") return a-b;
+  return String(a==null?"":a).localeCompare(String(b==null?"":b),"fr",{numeric:true,sensitivity:"base"});
+}
+const ORDER_KEYS = {
+  poste:o=>o.poste, descriptif:o=>o.descriptif, reference:o=>o.reference, fournisseur:o=>o.fournisseur, url:o=>o.url,
+  pu:o=>o.pu, qty:o=>o.qty, total:o=>o.pu*o.qty, leadtime:o=>o.leadtime==null?-1:o.leadtime, status:o=>OST[o.status]||o.status
+};
+const TASK_KEYS = { phase:t=>t.phase, label:t=>t.label, resp:t=>t.resp, start:t=>t.start, end:t=>t.end, status:t=>ST_TXT[t.status]||t.status };
+function sortOrderList(list, s){
+  if(!s.col || !ORDER_KEYS[s.col]) return list;
+  const f = ORDER_KEYS[s.col];
+  return list.slice().sort((a,b)=>cmpVal(f(a),f(b))*s.dir);
+}
+function markSortHeaders(table, s){
+  table.querySelectorAll("th.sortable").forEach(th=>{
+    const on = s.col === th.dataset.sort;
+    th.classList.toggle("sorted", on);
+    th.setAttribute("data-arrow", on ? (s.dir===1 ? " ▲" : " ▼") : "");
+    th.title = "Trier par cette colonne (ordre alphabétique / croissant, puis inverse)";
+  });
+}
+let edOrderSort = {col:null,dir:1}, edTaskSort = {col:null,dir:1};
+function wireSort(){
+  // Tableau de la vue Commandes : tri d'affichage (et des exports)
+  const vt = document.querySelector("#view-orders table.orders");
+  vt.querySelectorAll("th.sortable").forEach(th=>th.addEventListener("click", ()=>{
+    const c = th.dataset.sort;
+    orderSort = orderSort.col===c ? {col:c, dir:-orderSort.dir} : {col:c, dir:1};
+    renderOrders();
+  }));
+  // Édition : tri sur place des lignes du centre
+  document.querySelectorAll("#editOrdersTable th.sortable").forEach(th=>th.addEventListener("click", ()=>{
+    const c = th.dataset.sort, cen = DATA.centers.find(x=>x.id===activeEditCenterId); if(!cen) return;
+    edOrderSort = edOrderSort.col===c ? {col:c, dir:-edOrderSort.dir} : {col:c, dir:1};
+    const f = ORDER_KEYS[c];
+    cen.orders = cen.orders.slice().sort((a,b)=>cmpVal(a.cat===b.cat?0:CATS.findIndex(x=>x.k===a.cat)-CATS.findIndex(x=>x.k===b.cat),0)||cmpVal(f(a),f(b))*edOrderSort.dir);
+    markDirty(); renderEditor(); renderOrders();
+  }));
+  document.querySelectorAll("#editTasksTable th.sortable").forEach(th=>th.addEventListener("click", ()=>{
+    const c = th.dataset.sort, cen = DATA.centers.find(x=>x.id===activeEditCenterId); if(!cen) return;
+    edTaskSort = edTaskSort.col===c ? {col:c, dir:-edTaskSort.dir} : {col:c, dir:1};
+    const f = TASK_KEYS[c];
+    cen.tasks = cen.tasks.slice().sort((a,b)=>cmpVal(f(a),f(b))*edTaskSort.dir);
+    markDirty(); renderEditor(); renderKanban();
+  }));
+}
+
 function renderOrders(){
   const c = DATA.centers.find(x=>x.id===activeOrderCenterId);
   if(!c) return;
   const cat = CAT_BY[activeOrderCat];
-  const list = c.orders.filter(o=>o.cat===activeOrderCat);
+  const list = sortOrderList(c.orders.filter(o=>o.cat===activeOrderCat), orderSort);
+  markSortHeaders(document.querySelector("#view-orders table.orders"), orderSort);
   const tabs = document.getElementById("orderCatTabs");
   tabs.innerHTML = "";
   CATS.forEach(ct=>{
@@ -384,7 +435,7 @@ function catRows(){
   const scope = scopeEl ? scopeEl.value : "center";
   const centers = scope==="all" ? DATA.centers : DATA.centers.filter(c=>c.id===activeOrderCenterId);
   const rows = [];
-  centers.forEach(c=>c.orders.filter(o=>o.cat===activeOrderCat).forEach(o=>rows.push({c,o})));
+  centers.forEach(c=>sortOrderList(c.orders.filter(o=>o.cat===activeOrderCat), orderSort).forEach(o=>rows.push({c,o})));
   return {scope, centers, rows};
 }
 function slug(t){ return t.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,""); }
@@ -817,6 +868,7 @@ function fieldRow(label, inputHtml, full){
 
 function renderEditor(){
   const c = DATA.centers.find(x=>x.id===activeEditCenterId);
+  markSortHeaders(document.getElementById("editOrdersTable"), edOrderSort); markSortHeaders(document.getElementById("editTasksTable"), edTaskSort);
   const form = document.getElementById("editCenterForm");
   if(!c){ form.innerHTML = "<p>Aucun centre — utilisez « + Nouveau centre ».</p>"; document.getElementById("editTasksBody").innerHTML=""; document.getElementById("editOrdersBody").innerHTML=""; return; }
 
@@ -1058,6 +1110,7 @@ function wireEditorButtons(){
     e.target.reset(); document.getElementById("af-qty").value = 1; e.target.hidden = true;
     renderOrders(); renderOverview(); renderEditor();
   });
+  wireSort();
   document.getElementById("btnCsvCat").addEventListener("click", exportCatCsv);
   document.getElementById("btnPdfCat").addEventListener("click", exportCatPdf);
   document.getElementById("btnPdfAll").addEventListener("click", ()=>exportReportPdf("all"));

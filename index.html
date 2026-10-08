@@ -83,7 +83,7 @@
     </form>
     <div class="export-bar"><button class="btn" id="btnExportCenter">⇩ Excel complet — ce centre</button> <button class="btn" id="btnExportAll">⇩ Excel complet — tous les centres</button> <span class="export-hint">Articles « À commander » des 3 rubriques, une feuille par rubrique.</span></div>
     <table class="orders">
-      <thead><tr><th>Article</th><th>Descriptif</th><th>Référence</th><th>Fournisseur</th><th>Lien</th><th>PU</th><th>Qté</th><th>Total</th><th>Statut</th></tr></thead>
+      <thead><tr><th class="sortable" data-sort="poste">Article</th><th class="sortable" data-sort="descriptif">Descriptif</th><th class="sortable" data-sort="reference">Référence</th><th class="sortable" data-sort="fournisseur">Fournisseur</th><th class="sortable" data-sort="url">Lien</th><th class="sortable" data-sort="pu">PU</th><th class="sortable" data-sort="qty">Qté</th><th class="sortable" data-sort="total">Total</th><th class="sortable" data-sort="status">Statut</th></tr></thead>
       <tbody id="orderRows"></tbody>
     </table>
   </div>
@@ -114,7 +114,7 @@
     <div class="edit-section">
       <h3>Tâches <button class="btn btn-small" id="btnAddTask">+ Ajouter une tâche</button></h3>
       <table class="edit-table" id="editTasksTable">
-        <thead><tr><th>Phase</th><th>Description</th><th>Responsable</th><th>Début</th><th>Fin</th><th>Statut</th><th>Jalon</th><th></th></tr></thead>
+        <thead><tr><th class="sortable" data-sort="phase">Phase</th><th class="sortable" data-sort="label">Description</th><th class="sortable" data-sort="resp">Responsable</th><th class="sortable" data-sort="start">Début</th><th class="sortable" data-sort="end">Fin</th><th class="sortable" data-sort="status">Statut</th><th>Jalon</th><th></th></tr></thead>
         <tbody id="editTasksBody"></tbody>
       </table>
     </div>
@@ -122,7 +122,7 @@
     <div class="edit-section">
       <h3>Commandes / articles <span class="export-hint">(un bouton « Ajouter » par rubrique)</span></h3>
       <table class="edit-table" id="editOrdersTable">
-        <thead><tr><th>Article</th><th>Descriptif</th><th>Référence</th><th>Fournisseur</th><th>Lien URL</th><th>PU (€)</th><th>Qté</th><th>Délai (sem.)</th><th>Statut</th><th></th></tr></thead>
+        <thead><tr><th class="sortable" data-sort="poste">Article</th><th class="sortable" data-sort="descriptif">Descriptif</th><th class="sortable" data-sort="reference">Référence</th><th class="sortable" data-sort="fournisseur">Fournisseur</th><th class="sortable" data-sort="url">Lien URL</th><th class="sortable" data-sort="pu">PU (€)</th><th class="sortable" data-sort="qty">Qté</th><th class="sortable" data-sort="leadtime">Délai (sem.)</th><th class="sortable" data-sort="status">Statut</th><th></th></tr></thead>
         <tbody id="editOrdersBody"></tbody>
       </table>
     </div>
