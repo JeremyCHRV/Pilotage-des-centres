@@ -293,6 +293,16 @@ function renderOrderCenterTabs(){
     wrap.appendChild(b);
   });
 }
+const ORDER_GROUPS = ["Pharmacie","Économat","Autres articles"];
+function orderGroup(o){
+  const f = (o.fournisseur||"").trim().toLowerCase();
+  if(f==="pharmacie") return "Pharmacie";
+  if(f==="économat" || f==="economat") return "Économat";
+  return "Autres articles";
+}
+function groupedOrders(list){
+  return ORDER_GROUPS.map(g=>({g, items:list.filter(o=>orderGroup(o)===g)})).filter(x=>x.items.length);
+}
 function renderOrders(){
   const c = DATA.centers.find(x=>x.id===activeOrderCenterId);
   const summary = document.getElementById("orderSummary");
@@ -308,7 +318,13 @@ function renderOrders(){
   if(addrEl){ const a=(c.adresse||"").trim(); addrEl.innerHTML = a ? `<b>Adresse de livraison :</b> ${esc(a)} <a href="${esc(mapsLink(a))}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:none;">Voir sur la carte ↗</a>` : `<b>Adresse de livraison :</b> <i>à renseigner dans l'onglet Édition</i>`; }
   const rows = document.getElementById("orderRows");
   rows.innerHTML = "";
-  c.orders.forEach(o=>{
+  groupedOrders(c.orders).forEach(({g,items})=>{
+  const gt = items.reduce((s,o)=>s+o.pu*o.qty,0);
+  const gh = document.createElement("tr");
+  gh.className = "grp-row";
+  gh.innerHTML = `<td colspan="7">${g} <span class="grp-n">(${items.length} article${items.length>1?"s":""})</span></td><td>${eur(gt)}</td><td></td>`;
+  rows.appendChild(gh);
+  items.forEach(o=>{
     const tr = document.createElement("tr");
     if(o.leadtime) tr.className = "leadtime";
     const link = safeUrl(o.url);
@@ -339,6 +355,7 @@ function renderOrders(){
       renderOrders(); renderOverview();
     });
     rows.appendChild(tr);
+  });
   });
   const totRow = document.createElement("tr");
   totRow.className = "tot-row";
@@ -561,9 +578,14 @@ function exportOrders(scope){
   const list = Object.values(groups).sort((a,b)=> a.fournisseur.localeCompare(b.fournisseur,"fr") || a.poste.localeCompare(b.poste,"fr"));
 
   const head1 = ["Fournisseur","Article","Descriptif","Référence","Lien URL","Qté","PU (€)","Total (€)","Délai (sem.)","Centres concernés"];
-  const rows1 = list.map((g,i)=>[g.fournisseur,g.poste,g.descriptif,g.reference,g.url,g.qty,g.pu,{f:`F${i+2}*G${i+2}`,v:g.qty*g.pu},g.leadtime,g.centres.join(", ")]);
-  const totalVal = list.reduce((s,g)=>s+g.qty*g.pu,0);
-  rows1.push(["TOTAL","","","","","","",{f:`SUM(H2:H${list.length+1})`,v:totalVal},"",""]);
+  const mkRows1 = (lst)=>{
+    const r = lst.map((g,i)=>[g.fournisseur,g.poste,g.descriptif,g.reference,g.url,g.qty,g.pu,{f:`F${i+2}*G${i+2}`,v:g.qty*g.pu},g.leadtime,g.centres.join(", ")]);
+    r.push(["TOTAL","","","","","","",{f:`SUM(H2:H${lst.length+1})`,v:lst.reduce((s,g)=>s+g.qty*g.pu,0)},"",""]);
+    return r;
+  };
+  const catOf = g => orderGroup({fournisseur:g.fournisseur});
+  const sheets1 = ORDER_GROUPS.map(cat=>({cat, lst:list.filter(g=>catOf(g)===cat)})).filter(x=>x.lst.length);
+  detail.sort((a,b)=>ORDER_GROUPS.indexOf(orderGroup(a.o))-ORDER_GROUPS.indexOf(orderGroup(b.o)));
 
   const head2 = ["Centre","Fournisseur","Article","Descriptif","Référence","Lien URL","Qté","PU (€)","Total (€)","Délai (sem.)","Adresse de livraison"];
   const rows2 = detail.map(({c,o},i)=>[c.nom,o.fournisseur,o.poste,o.descriptif,o.reference||"",safeUrl(o.url),o.qty,o.pu,{f:`G${i+2}*H${i+2}`,v:o.qty*o.pu},o.leadtime||"",c.adresse||""]);
@@ -590,7 +612,7 @@ function exportOrders(scope){
     return ws;
   };
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, mk(head1,rows1,[22,34,34,18,36,7,10,12,11,40],4,{6:'#,##0.00',7:'#,##0.00'}), "Bon de commande");
+  sheets1.forEach(({cat,lst})=>XLSX.utils.book_append_sheet(wb, mk(head1,mkRows1(lst),[22,34,34,18,36,7,10,12,11,40],4,{6:'#,##0.00',7:'#,##0.00'}), "Commande "+cat.replace(" articles","")));
   XLSX.utils.book_append_sheet(wb, mk(head2,rows2,[34,22,34,34,18,36,7,10,12,11,44],5,{7:'#,##0.00',8:'#,##0.00'}), "Détail par centre");
   const cs = [...new Map(detail.map(({c})=>[c.id,c])).values()];
   const ws3 = XLSX.utils.aoa_to_sheet([["Centre","Adresse de livraison","Plan"]].concat(cs.map(c=>[c.nom,c.adresse||"(à renseigner)", (c.adresse||"").trim()? mapsLink(c.adresse.trim()):""])));
@@ -798,7 +820,12 @@ function renderEditor(){
   // ---- Orders table ----
   const obody = document.getElementById("editOrdersBody");
   obody.innerHTML = "";
-  c.orders.forEach(o=>{
+  groupedOrders(c.orders).forEach(({g,items})=>{
+  const gh = document.createElement("tr");
+  gh.className = "grp-row";
+  gh.innerHTML = `<td colspan="10">${g} <span class="grp-n">(${items.length})</span></td>`;
+  obody.appendChild(gh);
+  items.forEach(o=>{
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td><input type="text" data-f="poste" value="${esc(o.poste)}" style="min-width:160px;"></td>
@@ -848,6 +875,7 @@ function renderEditor(){
     });
     obody.appendChild(tr);
   });
+  });
 }
 
 const KIT_E519 = [{"poste": "ADAPTATEUR LUER 367300 VACUTAINER", "reference": "9000960", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 150}, {"poste": "CUTIPLAST 7,2 X 5 CM", "reference": "9007429", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 100}, {"poste": "ECOUVILLON TRANSWAB MW176S", "reference": "9027534", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 10}, {"poste": "MICROPERFUSEUR AILETTE 21G 3/4 NIPSVS21", "reference": "9006181", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 150}, {"poste": "MICROPERFUSEUR AILETTE 23G 3/4 NIPSVS23", "reference": "9006199", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 150}, {"poste": "MICROPORE 2,5 CM X 9,14 M 1530-1", "reference": "5000048", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 1}, {"poste": "OUATES HEMOSTATIQUES QUALIPHAR FL 10 GR", "reference": "2734102", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 2}, {"poste": "POT URINE 120ML CANULE TRANSFE 364941", "reference": "9050015", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 50}, {"poste": "PORTE TUBE BD PRONTO 368872 VACUTAINER", "reference": "5004446", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 10}, {"poste": "STRIPS SPOT DIAM. 22MM 37242", "reference": "9006033", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 150}, {"poste": "TAMPON ALCOOL INDIVIDUEL 31-0606", "reference": "9006645", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 150}, {"poste": "VACUTAINER 363048 BLEU 2,7 ML 363048 HG/BL", "reference": "9014854", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 50}, {"poste": "VACUTAINER 367374 VERT 3 ML 367374 LHPST", "reference": "9017055", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 20}, {"poste": "VACUTAINER 367525 MAUVE 10 ML 367525 K2E", "reference": "9001505", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 10}, {"poste": "VACUTAINER 368815 ROUGE 6 ML 368815 CAT PLUS SEC", "reference": "9001547", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 20}, {"poste": "VACUTAINER 368856 MAUVE 3 ML 368856 K2E", "reference": "9001513", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 150}, {"poste": "VACUTAINER 368921 GRIS 4 ML 368921 HEMOGARD", "reference": "9001489", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 100}, {"poste": "VACUTAINER 368968 ROUGE 5 ML 368968 SST II COAG", "reference": "9001554", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 150}, {"poste": "VACUTAINER ACD TUBE 367756", "reference": "9046435", "fournisseur": "Pharmacie", "descriptif": "Pharmacie — centre de frais E519", "pu": 0, "qty": 5}, {"poste": "Bassin réniforme inox", "reference": "", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 0.0, "qty": 1}, {"poste": "TENSIOMETRE MANUEL HEINE GAMMA G5", "reference": "60100022", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 90.46, "qty": 1}, {"poste": "BASSIN RENIFORME 750ML (50P)", "reference": "60100032", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 2.92, "qty": 1}, {"poste": "BIC 4 COULEURS POINTE MOYENNE", "reference": "60500117", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 1.86, "qty": 1}, {"poste": "CISEAUX DE BUREAU 18CM", "reference": "60500022", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 1.96, "qty": 1}, {"poste": "CLASSEUR PVC A4 DOS 2 ANNEAUX 35MM ROUGE", "reference": "60500023", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 2.43, "qty": 1}, {"poste": "COLD HOT PACK 12X29CM + HOUSSE", "reference": "60100300", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 5.1, "qty": 2}, {"poste": "CONTAINER A AIGUILLES SHARPSAFE 7L", "reference": "60300014", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 2.79, "qty": 3}, {"poste": "EAU SPA REINE PLATE 33CL (24P)", "reference": "60700037", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 10.44, "qty": 1}, {"poste": "EKO SPACE CITRON 250ML", "reference": "60300746", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 0.17, "qty": 1}, {"poste": "EUCERIN PH5 SAVON LIQUIDE 1L + DISTR.NF", "reference": "60300801", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 14.52, "qty": 1}, {"poste": "GANT NITRILE NON POUDRE FINO PEHA-SOFT BLEU M (150P)", "reference": "60100053", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 10.06, "qty": 2}, {"poste": "GANT NITRILE NON POUDRE FINO PEHA-SOFT BLEU S (150P)", "reference": "60100052", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 10.24, "qty": 2}, {"poste": "GOBELET CARTON 240ML (50P)", "reference": "60700122", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 1.76, "qty": 1}, {"poste": "MARQUEUR FLUO JAUNE", "reference": "60500065", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 0.83, "qty": 1}, {"poste": "MARQUEUR GROS ARTLINE 70 NOIR", "reference": "60500070", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 1.5, "qty": 1}, {"poste": "MASQUE CHIRURGICAL TYPE IIR - FIXATIONS ELASTIQUES (50P)", "reference": "60600044", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 1.51, "qty": 1}, {"poste": "MOUCHOIR PREMIUM (100P)", "reference": "60300783", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 1.06, "qty": 1}, {"poste": "NATURAL ZZ 2 PLIS H3 (15X250P)", "reference": "60600134", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 32.22, "qty": 1}, {"poste": "POT A SELLE AVEC PETITE CUILLERE 60ML", "reference": "60101399", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 0.17, "qty": 20}, {"poste": "PUR ZELLIN 4X5CM", "reference": "60101367", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 1.91, "qty": 2}, {"poste": "SACHET POUBELLE PEBD GRAND GRIS 80CMX110CMX35M (20P)", "reference": "60300008", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 4.46, "qty": 1}, {"poste": "SACHET POUBELLE PEHD PETIT GRIS 50CMX60CMX15µM (50P)", "reference": "60300009", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 1.99, "qty": 1}, {"poste": "SACHET PRISE DE SANG 160X220MM (100P)", "reference": "60101401", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 0.0, "qty": 5}, {"poste": "TIPPEX RECHARGE ROLLER 4,2MM", "reference": "60500110", "fournisseur": "Économat", "descriptif": "Économat — centre de frais E519", "pu": 4.1, "qty": 0}];
@@ -865,6 +893,23 @@ function importKit(){
   });
   buildIndexes(); markDirty(); renderEditor(); renderOrders(); renderOverview();
   alert(added + " ligne(s) ajoutée(s) au total. Ajustez les quantités par centre dans l'onglet Édition si besoin.");
+}
+
+function copySoumagne(){
+  const src = DATA.centers.find(c=>/soumagne/i.test(c.nom));
+  if(!src){ alert("Centre « Soumagne » introuvable."); return; }
+  if(!confirm("Copier les "+src.orders.length+" articles de « "+src.nom+" » vers tous les autres centres ? Les articles déjà présents (même référence et même nom) sont ignorés ; rien n'est écrasé.")) return;
+  let added = 0;
+  otherCenters(src).forEach(c=>{
+    src.orders.forEach(k=>{
+      const dup = c.orders.some(o=> o.poste===k.poste && (o.reference||"")===(k.reference||""));
+      if(dup) return;
+      c.orders.push({ ...k, id: genId("o"), gk: ensureGk(k), status:"a_commander" });
+      added++;
+    });
+  });
+  buildIndexes(); markDirty(); renderEditor(); renderOrders(); renderOverview();
+  alert(added + " ligne(s) ajoutée(s) aux autres centres.");
 }
 
 function wireEditorButtons(){
@@ -933,6 +978,7 @@ function wireEditorButtons(){
     if(DATA_SOURCE === "api"){ clearTimeout(pushTimer); pushSilently(); } else publishData();
   });
   document.getElementById("btnImportKit").addEventListener("click", importKit);
+  document.getElementById("btnCopySoumagne").addEventListener("click", copySoumagne);
   loadPropPrefs();
   ["chkPropAll","chkPropDates"].forEach(id=>document.getElementById(id).addEventListener("change", savePropPrefs));
   document.getElementById("btnDownload").addEventListener("click", downloadDataBackup);

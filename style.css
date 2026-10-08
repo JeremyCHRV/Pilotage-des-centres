@@ -207,3 +207,6 @@
 
 .prop-box{background:#EAF4F4;border:1px solid #BFDCDC;border-radius:8px;padding:10px 14px;margin-bottom:18px;display:flex;flex-direction:column;gap:6px;font-size:13px;}
 .prop-box label{display:flex;gap:8px;align-items:flex-start;cursor:pointer;}
+
+tr.grp-row td{background:#E3EEF0;font-weight:700;color:#14414B;padding:8px 10px;border-top:2px solid #BFDCDC;}
+tr.grp-row .grp-n{font-weight:400;color:#5B6B7A;font-size:12px;}
