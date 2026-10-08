@@ -50,6 +50,10 @@ function normOrder(o){
   if(o.fournisseur===undefined) o.fournisseur="";
   if(o.url===undefined) o.url="";
   if(o.reference===undefined) o.reference="";
+  if(!["economat","pharmacie","autres"].includes(o.cat)){
+    const f=(o.fournisseur||"").trim().toLowerCase();
+    o.cat = f==="pharmacie" ? "pharmacie" : (f==="économat"||f==="economat") ? "economat" : "autres";
+  }
   delete o.info;
 }
 function esc(v){ return String(v==null?"":v).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
@@ -293,38 +297,50 @@ function renderOrderCenterTabs(){
     wrap.appendChild(b);
   });
 }
-const ORDER_GROUPS = ["Pharmacie","Économat","Autres articles"];
-function orderGroup(o){
-  const f = (o.fournisseur||"").trim().toLowerCase();
-  if(f==="pharmacie") return "Pharmacie";
-  if(f==="économat" || f==="economat") return "Économat";
-  return "Autres articles";
-}
-function groupedOrders(list){
-  return ORDER_GROUPS.map(g=>({g, items:list.filter(o=>orderGroup(o)===g)})).filter(x=>x.items.length);
-}
+const CATS = [
+  {k:"economat", label:"Économat", short:"Économat"},
+  {k:"pharmacie", label:"Pharmacie", short:"Pharmacie"},
+  {k:"autres", label:"Autres fournisseurs – Starter pack", short:"Autres fournisseurs"},
+];
+const CAT_BY = Object.fromEntries(CATS.map(c=>[c.k,c]));
+const OST = {a_commander:"À commander", commande:"Commandé", livre:"Livré", na:"Non nécessaire"};
+let activeOrderCat = "economat";
 function renderOrders(){
   const c = DATA.centers.find(x=>x.id===activeOrderCenterId);
+  if(!c) return;
+  const cat = CAT_BY[activeOrderCat];
+  const list = c.orders.filter(o=>o.cat===activeOrderCat);
+  const tabs = document.getElementById("orderCatTabs");
+  tabs.innerHTML = "";
+  CATS.forEach(ct=>{
+    const n = c.orders.filter(o=>o.cat===ct.k).length;
+    const b = document.createElement("button");
+    b.className = "ctab cat-tab" + (ct.k===activeOrderCat ? " active":"");
+    b.textContent = ct.label + " (" + n + ")";
+    b.onclick = ()=>{ activeOrderCat = ct.k; renderOrders(); };
+    tabs.appendChild(b);
+  });
+  const addTitle = document.getElementById("addFormTitle");
+  if(addTitle) addTitle.textContent = "Nouvel article — " + cat.label + " (" + c.nom + ")";
   const summary = document.getElementById("orderSummary");
-  const total = c.orders.reduce((s,o)=>s+o.pu*o.qty,0);
-  const engaged = c.orders.filter(o=>o.status==="commande"||o.status==="livre").reduce((s,o)=>s+o.pu*o.qty,0);
-  const livre = c.orders.filter(o=>o.status==="livre").length;
+  const total = list.reduce((s,o)=>s+o.pu*o.qty,0);
+  const engaged = list.filter(o=>o.status==="commande"||o.status==="livre").reduce((s,o)=>s+o.pu*o.qty,0);
+  const livre = list.filter(o=>o.status==="livre").length;
   summary.innerHTML = `
-    <div class="stat"><div class="n">${eur(total)}</div><div class="l">Budget total estimé</div></div>
+    <div class="stat"><div class="n">${eur(total)}</div><div class="l">Budget estimé — ${esc(cat.label)}</div></div>
     <div class="stat"><div class="n">${eur(engaged)}</div><div class="l">Engagé (commandé + livré)</div></div>
-    <div class="stat"><div class="n">${livre}/${c.orders.length}</div><div class="l">Articles livrés</div></div>
+    <div class="stat"><div class="n">${livre}/${list.length}</div><div class="l">Articles livrés</div></div>
   `;
   const addrEl = document.getElementById("orderAddress");
   if(addrEl){ const a=(c.adresse||"").trim(); addrEl.innerHTML = a ? `<b>Adresse de livraison :</b> ${esc(a)} <a href="${esc(mapsLink(a))}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);text-decoration:none;">Voir sur la carte ↗</a>` : `<b>Adresse de livraison :</b> <i>à renseigner dans l'onglet Édition</i>`; }
   const rows = document.getElementById("orderRows");
   rows.innerHTML = "";
-  groupedOrders(c.orders).forEach(({g,items})=>{
-  const gt = items.reduce((s,o)=>s+o.pu*o.qty,0);
-  const gh = document.createElement("tr");
-  gh.className = "grp-row";
-  gh.innerHTML = `<td colspan="7">${g} <span class="grp-n">(${items.length} article${items.length>1?"s":""})</span></td><td>${eur(gt)}</td><td></td>`;
-  rows.appendChild(gh);
-  items.forEach(o=>{
+  if(!list.length){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="9" style="text-align:center;color:#5B6B7A;padding:18px;">Aucun article dans cette rubrique — utilisez « ＋ Ajouter un article ».</td>`;
+    rows.appendChild(tr);
+  }
+  list.forEach(o=>{
     const tr = document.createElement("tr");
     if(o.leadtime) tr.className = "leadtime";
     const link = safeUrl(o.url);
@@ -356,11 +372,82 @@ function renderOrders(){
     });
     rows.appendChild(tr);
   });
-  });
   const totRow = document.createElement("tr");
   totRow.className = "tot-row";
-  totRow.innerHTML = `<td colspan="7">TOTAL</td><td>${eur(total)}</td><td></td>`;
+  totRow.innerHTML = `<td colspan="7">TOTAL ${esc(cat.label)}</td><td>${eur(total)}</td><td></td>`;
   rows.appendChild(totRow);
+}
+
+/* ---- Export CSV / PDF par rubrique ---- */
+function catRows(){
+  const scopeEl = document.getElementById("exScope");
+  const scope = scopeEl ? scopeEl.value : "center";
+  const centers = scope==="all" ? DATA.centers : DATA.centers.filter(c=>c.id===activeOrderCenterId);
+  const rows = [];
+  centers.forEach(c=>c.orders.filter(o=>o.cat===activeOrderCat).forEach(o=>rows.push({c,o})));
+  return {scope, centers, rows};
+}
+function slug(t){ return t.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,""); }
+function exportCatCsv(){
+  const {scope, centers, rows} = catRows();
+  if(!rows.length){ alert("Aucun article à exporter dans cette rubrique."); return; }
+  const cat = CAT_BY[activeOrderCat];
+  const num = n => String(n).replace(".",",");
+  const head = ["Centre","Article","Descriptif","Référence","Fournisseur","Lien URL","PU (€)","Qté","Total (€)","Statut","Adresse de livraison"];
+  const data = rows.map(({c,o})=>[c.nom,o.poste,o.descriptif,o.reference,o.fournisseur,safeUrl(o.url),num(o.pu),o.qty,num((o.pu*o.qty).toFixed(2)),OST[o.status]||o.status,c.adresse||""]);
+  const tot = rows.reduce((s,{o})=>s+o.pu*o.qty,0);
+  data.push(["TOTAL","","","","","","","",num(tot.toFixed(2)),"",""]);
+  const csv = [head].concat(data).map(r=>r.map(v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"').join(";")).join("\r\n");
+  const blob = new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = `commande_${slug(cat.short)}_${scope==="all"?"tous_centres":slug(centers[0].nom.split(/[–-]/)[0].replace(/^\d+\.\s*/,""))}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function catPdfHtml(){
+  const {scope, centers, rows} = catRows();
+  const cat = CAT_BY[activeOrderCat];
+  const fm = n => n.toLocaleString("fr-BE",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+  let body = "";
+  centers.forEach(c=>{
+    const l = rows.filter(r=>r.c===c).map(r=>r.o);
+    if(!l.length) return;
+    const t = l.reduce((s,o)=>s+o.pu*o.qty,0);
+    body += `<section><h2>${esc(c.nom)}</h2>${(c.adresse||"").trim()?`<div class="ad">📍 ${esc(c.adresse)}</div>`:""}
+    <table><thead><tr><th>Article</th><th>Descriptif</th><th>Réf.</th><th>Fournisseur</th><th class="r">PU</th><th class="r">Qté</th><th class="r">Total</th><th>Statut</th></tr></thead><tbody>` +
+    l.map(o=>`<tr><td>${esc(o.poste)}</td><td>${esc(o.descriptif)}</td><td>${esc(o.reference)}</td><td>${esc(o.fournisseur)}</td><td class="r">${fm(o.pu)}</td><td class="r">${o.qty}</td><td class="r">${fm(o.pu*o.qty)}</td><td>${OST[o.status]||o.status}</td></tr>`).join("") +
+    `<tr class="t"><td colspan="6">Total ${esc(c.nom)}</td><td class="r">${fm(t)}</td><td></td></tr></tbody></table></section>`;
+  });
+  const grand = rows.reduce((s,{o})=>s+o.pu*o.qty,0);
+  return `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Commande ${esc(cat.label)}</title><style>
+  @page{size:A4 landscape;margin:12mm;} body{font-family:Arial,Helvetica,sans-serif;font-size:10.5px;color:#1B2A36;margin:0;}
+  h1{font-size:18px;margin:0 0 2px;color:#14414B;} .sub{color:#5B6B7A;margin-bottom:12px;} h2{font-size:13px;margin:14px 0 2px;color:#14414B;} .ad{color:#5B6B7A;margin-bottom:4px;}
+  table{width:100%;border-collapse:collapse;margin-bottom:6px;} th{background:#E3EEF0;text-align:left;padding:4px 6px;border-bottom:1px solid #9DBFC4;} td{padding:3px 6px;border-bottom:1px solid #E1E8EC;vertical-align:top;}
+  thead{display:table-header-group;} tr{page-break-inside:avoid;} .r{text-align:right;white-space:nowrap;} tr.t td{font-weight:700;background:#F4F8F9;} .g{text-align:right;font-weight:700;font-size:13px;margin-top:8px;}
+  </style></head><body><h1>Commande — ${esc(cat.label)}</h1><div class="sub">CHR Verviers · Laboratoire · édité le ${new Date().toLocaleDateString("fr-BE")} · ${scope==="all"?"tous les centres":esc(centers[0].nom)}</div>${body}${scope==="all"?`<div class="g">TOTAL GÉNÉRAL ${esc(cat.label)} : ${fm(grand)}</div>`:""}</body></html>`;
+}
+function exportCatPdf(){
+  const {rows} = catRows();
+  if(!rows.length){ alert("Aucun article à exporter dans cette rubrique."); return; }
+  const old = document.getElementById("reportFrame"); if(old) old.remove();
+  const fr = document.createElement("iframe");
+  fr.id = "reportFrame";
+  fr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+  document.body.appendChild(fr);
+  const doc = fr.contentWindow.document;
+  doc.open(); doc.write(catPdfHtml()); doc.close();
+  setTimeout(()=>{ if(fr.contentWindow){ fr.contentWindow.focus(); fr.contentWindow.print(); } }, 350);
+}
+
+/* ---- Ajout d'un article (indépendant pour chaque rubrique) ---- */
+function addOrderTo(c, catKey, f){
+  const no = { id: genId("o"), cat: catKey, poste:f.poste||"Nouvel article", descriptif:f.descriptif||"", reference:f.reference||"", fournisseur:f.fournisseur||"", url:f.url||"", pu:f.pu||0, qty:f.qty==null?1:f.qty, status:"a_commander", leadtime:null };
+  c.orders.push(no);
+  if(propOn()){
+    ensureGk(no);
+    otherCenters(c).forEach(o=>{ o.orders.push({ ...no, id: genId("o") }); });
+  }
+  buildIndexes(); markDirty();
+  return no;
 }
 
 /* ---------------- Résumé PDF (impression) ---------------- */
@@ -568,8 +655,8 @@ function exportOrders(scope){
   // Regroupement par fournisseur + article (quantités additionnées entre centres)
   const groups = {};
   detail.forEach(({c,o})=>{
-    const k = [o.fournisseur,o.poste,o.reference,o.pu,o.url].join("|");
-    const g = groups[k] || (groups[k] = {fournisseur:o.fournisseur||"(sans fournisseur)", poste:o.poste, descriptif:o.descriptif, reference:o.reference||"", url:safeUrl(o.url), pu:o.pu, qty:0, leadtime:o.leadtime||"", centres:[]});
+    const k = [o.cat,o.fournisseur,o.poste,o.reference,o.pu,o.url].join("|");
+    const g = groups[k] || (groups[k] = {cat:o.cat, fournisseur:o.fournisseur||"(sans fournisseur)", poste:o.poste, descriptif:o.descriptif, reference:o.reference||"", url:safeUrl(o.url), pu:o.pu, qty:0, leadtime:o.leadtime||"", centres:[]});
     g.qty += o.qty;
     const nom = c.nom.replace(/^\d+\.\s*/,"");
     if(!g.centres.includes(nom)) g.centres.push(nom);
@@ -583,9 +670,8 @@ function exportOrders(scope){
     r.push(["TOTAL","","","","","","",{f:`SUM(H2:H${lst.length+1})`,v:lst.reduce((s,g)=>s+g.qty*g.pu,0)},"",""]);
     return r;
   };
-  const catOf = g => orderGroup({fournisseur:g.fournisseur});
-  const sheets1 = ORDER_GROUPS.map(cat=>({cat, lst:list.filter(g=>catOf(g)===cat)})).filter(x=>x.lst.length);
-  detail.sort((a,b)=>ORDER_GROUPS.indexOf(orderGroup(a.o))-ORDER_GROUPS.indexOf(orderGroup(b.o)));
+  const sheets1 = CATS.map(ct=>({cat:ct.short, lst:list.filter(g=>g.cat===ct.k)})).filter(x=>x.lst.length);
+  detail.sort((a,b)=>CATS.findIndex(x=>x.k===a.o.cat)-CATS.findIndex(x=>x.k===b.o.cat));
 
   const head2 = ["Centre","Fournisseur","Article","Descriptif","Référence","Lien URL","Qté","PU (€)","Total (€)","Délai (sem.)","Adresse de livraison"];
   const rows2 = detail.map(({c,o},i)=>[c.nom,o.fournisseur,o.poste,o.descriptif,o.reference||"",safeUrl(o.url),o.qty,o.pu,{f:`G${i+2}*H${i+2}`,v:o.qty*o.pu},o.leadtime||"",c.adresse||""]);
@@ -612,7 +698,7 @@ function exportOrders(scope){
     return ws;
   };
   const wb = XLSX.utils.book_new();
-  sheets1.forEach(({cat,lst})=>XLSX.utils.book_append_sheet(wb, mk(head1,mkRows1(lst),[22,34,34,18,36,7,10,12,11,40],4,{6:'#,##0.00',7:'#,##0.00'}), "Commande "+cat.replace(" articles","")));
+  sheets1.forEach(({cat,lst})=>XLSX.utils.book_append_sheet(wb, mk(head1,mkRows1(lst),[22,34,34,18,36,7,10,12,11,40],4,{6:'#,##0.00',7:'#,##0.00'}), "Commande "+cat));
   XLSX.utils.book_append_sheet(wb, mk(head2,rows2,[34,22,34,34,18,36,7,10,12,11,44],5,{7:'#,##0.00',8:'#,##0.00'}), "Détail par centre");
   const cs = [...new Map(detail.map(({c})=>[c.id,c])).values()];
   const ws3 = XLSX.utils.aoa_to_sheet([["Centre","Adresse de livraison","Plan"]].concat(cs.map(c=>[c.nom,c.adresse||"(à renseigner)", (c.adresse||"").trim()? mapsLink(c.adresse.trim()):""])));
@@ -820,10 +906,11 @@ function renderEditor(){
   // ---- Orders table ----
   const obody = document.getElementById("editOrdersBody");
   obody.innerHTML = "";
-  groupedOrders(c.orders).forEach(({g,items})=>{
+  CATS.map(ct=>({ct, items:c.orders.filter(o=>o.cat===ct.k)})).forEach(({ct,items})=>{
   const gh = document.createElement("tr");
   gh.className = "grp-row";
-  gh.innerHTML = `<td colspan="10">${g} <span class="grp-n">(${items.length})</span></td>`;
+  gh.innerHTML = `<td colspan="10">${ct.label} <span class="grp-n">(${items.length})</span> <button class="btn btn-small" data-addcat="${ct.k}">＋ Ajouter un article</button></td>`;
+  gh.querySelector("button").addEventListener("click", ()=>{ addOrderTo(c, ct.k, {}); renderEditor(); renderOrders(); renderOverview(); });
   obody.appendChild(gh);
   items.forEach(o=>{
     const tr = document.createElement("tr");
@@ -887,7 +974,7 @@ function importKit(){
     KIT_E519.forEach(k=>{
       if(c.orders.some(o=>(o.reference||"")===k.reference && o.poste===k.poste && k.reference)) return;
       if(!k.reference && c.orders.some(o=>o.poste===k.poste && o.fournisseur===k.fournisseur)) return;
-      c.orders.push({ id: genId("o"), gk: "kit-"+(k.reference||k.poste), poste:k.poste, descriptif:k.descriptif, reference:k.reference, fournisseur:k.fournisseur, url:"", pu:k.pu, qty:k.qty, status:"a_commander", leadtime:null });
+      c.orders.push({ id: genId("o"), cat: k.fournisseur==="Pharmacie"?"pharmacie":"economat", gk: "kit-"+(k.reference||k.poste), poste:k.poste, descriptif:k.descriptif, reference:k.reference, fournisseur:k.fournisseur, url:"", pu:k.pu, qty:k.qty, status:"a_commander", leadtime:null });
       added++;
     });
   });
@@ -957,19 +1044,22 @@ function wireEditorButtons(){
     renderEditor(); renderKanban(); renderOverview(); renderPlanning();
   });
 
-  document.getElementById("btnAddOrder").addEventListener("click", ()=>{
-    const c = DATA.centers.find(x=>x.id===activeEditCenterId);
-    if(!c) return;
-    const no = { id: genId("o"), poste:"Nouvel article", descriptif:"", reference:"", fournisseur:"", url:"", pu:0, qty:1, status:"a_commander", leadtime:null };
-    c.orders.push(no);
-    if(propOn()){
-      ensureGk(no);
-      otherCenters(c).forEach(o=>{ o.orders.push({ ...no, id: genId("o") }); });
-    }
-    buildIndexes(); markDirty();
-    renderEditor(); renderOrders(); renderOverview();
+  document.getElementById("btnToggleAdd").addEventListener("click", ()=>{
+    const f = document.getElementById("addForm"); f.hidden = !f.hidden;
+    if(!f.hidden) document.getElementById("af-poste").focus();
   });
-
+  document.getElementById("btnCancelAdd").addEventListener("click", ()=>{ document.getElementById("addForm").hidden = true; });
+  document.getElementById("addForm").addEventListener("submit", (e)=>{
+    e.preventDefault();
+    const c = DATA.centers.find(x=>x.id===activeOrderCenterId); if(!c) return;
+    const v = id => document.getElementById("af-"+id).value.trim();
+    if(!v("poste")){ alert("Indiquez au minimum le nom de l'article."); return; }
+    addOrderTo(c, activeOrderCat, { poste:v("poste"), descriptif:v("descriptif"), reference:v("reference"), fournisseur:v("fournisseur"), url:v("url"), pu:parseFloat(v("pu").replace(",","."))||0, qty:parseInt(v("qty"),10)||1 });
+    e.target.reset(); document.getElementById("af-qty").value = 1; e.target.hidden = true;
+    renderOrders(); renderOverview(); renderEditor();
+  });
+  document.getElementById("btnCsvCat").addEventListener("click", exportCatCsv);
+  document.getElementById("btnPdfCat").addEventListener("click", exportCatPdf);
   document.getElementById("btnPdfAll").addEventListener("click", ()=>exportReportPdf("all"));
   document.getElementById("btnPdfCenter").addEventListener("click", ()=>exportReportPdf("center"));
   document.getElementById("btnExportCenter").addEventListener("click", ()=>exportOrders("center"));

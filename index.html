@@ -58,13 +58,30 @@
 
   <div class="view" id="view-orders">
     <div class="center-tabs" id="orderCenterTabs"></div>
+    <div class="center-tabs cat-tabs" id="orderCatTabs"></div>
     <div class="order-summary" id="orderSummary"></div>
     <div class="center-meta" id="orderAddress"></div>
     <div class="export-bar">
-      <button class="btn btn-publish" id="btnExportCenter">⇩ Exporter ce centre (Excel)</button>
-      <button class="btn btn-publish" id="btnExportAll">⇩ Exporter tous les centres (Excel)</button>
-      <span class="export-hint">Seuls les articles « À commander » sont exportés, regroupés par fournisseur.</span>
+      <label class="ex-scope">Exporter : <select id="exScope"><option value="center">ce centre</option><option value="all">tous les centres</option></select></label>
+      <button class="btn btn-publish" id="btnCsvCat">⇩ CSV</button>
+      <button class="btn btn-publish" id="btnPdfCat">⇩ PDF</button>
+      <button class="btn" id="btnToggleAdd">＋ Ajouter un article</button>
+      <span class="export-hint">L'export concerne uniquement la rubrique affichée.</span>
     </div>
+    <form class="add-form" id="addForm" hidden>
+      <h4 id="addFormTitle">Nouvel article</h4>
+      <div class="edit-grid">
+        <div><label>Article *</label><input type="text" id="af-poste" required></div>
+        <div><label>Descriptif</label><input type="text" id="af-descriptif"></div>
+        <div><label>Référence</label><input type="text" id="af-reference"></div>
+        <div><label>Fournisseur</label><input type="text" id="af-fournisseur"></div>
+        <div><label>Lien URL</label><input type="text" id="af-url" placeholder="https://…"></div>
+        <div><label>PU (€)</label><input type="text" id="af-pu" inputmode="decimal" value="0"></div>
+        <div><label>Quantité</label><input type="number" id="af-qty" value="1" min="0"></div>
+      </div>
+      <div style="margin-top:10px;"><button class="btn btn-publish" type="submit">Ajouter</button> <button class="btn" type="button" id="btnCancelAdd">Annuler</button></div>
+    </form>
+    <div class="export-bar"><button class="btn" id="btnExportCenter">⇩ Excel complet — ce centre</button> <button class="btn" id="btnExportAll">⇩ Excel complet — tous les centres</button> <span class="export-hint">Articles « À commander » des 3 rubriques, une feuille par rubrique.</span></div>
     <table class="orders">
       <thead><tr><th>Article</th><th>Descriptif</th><th>Référence</th><th>Fournisseur</th><th>Lien</th><th>PU</th><th>Qté</th><th>Total</th><th>Statut</th></tr></thead>
       <tbody id="orderRows"></tbody>
@@ -103,7 +120,7 @@
     </div>
 
     <div class="edit-section">
-      <h3>Commandes / articles <button class="btn btn-small" id="btnAddOrder">+ Ajouter un article</button></h3>
+      <h3>Commandes / articles <span class="export-hint">(un bouton « Ajouter » par rubrique)</span></h3>
       <table class="edit-table" id="editOrdersTable">
         <thead><tr><th>Article</th><th>Descriptif</th><th>Référence</th><th>Fournisseur</th><th>Lien URL</th><th>PU (€)</th><th>Qté</th><th>Délai (sem.)</th><th>Statut</th><th></th></tr></thead>
         <tbody id="editOrdersBody"></tbody>

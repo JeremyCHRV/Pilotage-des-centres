@@ -210,3 +210,11 @@
 
 tr.grp-row td{background:#E3EEF0;font-weight:700;color:#14414B;padding:8px 10px;border-top:2px solid #BFDCDC;}
 tr.grp-row .grp-n{font-weight:400;color:#5B6B7A;font-size:12px;}
+
+.cat-tabs{margin-top:-6px;}
+.cat-tab{font-weight:700;border-style:dashed;}
+.cat-tab.active{border-style:solid;}
+.ex-scope{font-size:13px;display:inline-flex;gap:6px;align-items:center;margin-right:6px;}
+.add-form{background:#F4F8F9;border:1px solid #BFDCDC;border-radius:8px;padding:12px 14px;margin:0 0 14px;}
+.add-form[hidden]{display:none;}
+.add-form h4{margin:0 0 8px;color:#14414B;}
