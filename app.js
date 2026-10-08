@@ -174,46 +174,66 @@ function renderOverview(){
 /* ---------------- Planning (timeline) ---------------- */
 let TL_START, TL_END, TOTAL_DAYS;
 
+function computeTimeline(){
+  let mn=null, mx=null;
+  const upd = d=>{ if(!d) return; if(mn===null||d<mn) mn=d; if(mx===null||d>mx) mx=d; };
+  DATA.centers.forEach(c=>{ upd(c.kickoff); upd(c.ouverture); c.tasks.forEach(t=>{ upd(t.start); upd(t.end); }); });
+  if(mn===null){ TL_START = parseISO(CONFIG.timelineStart); TL_END = parseISO(CONFIG.timelineEnd); }
+  else{
+    const a = parseISO(mn), z = parseISO(mx);
+    TL_START = new Date(a.getFullYear(), a.getMonth(), 1);
+    TL_END = new Date(z.getFullYear(), z.getMonth()+1, 1);
+    if(diffDays(TL_END,z) < 10) TL_END = new Date(z.getFullYear(), z.getMonth()+2, 1);
+  }
+  TOTAL_DAYS = Math.max(30, diffDays(TL_END, TL_START));
+}
+// Répartit les tâches sur des lignes (voies) pour qu'aucune barre n'en masque une autre
+function assignLanes(tasks){
+  const sorted = tasks.filter(t=>!t.milestone).slice().sort((a,b)=>a.start.localeCompare(b.start)||a.end.localeCompare(b.end));
+  const ends = [], lane = new Map();
+  sorted.forEach(t=>{
+    let i = ends.findIndex(e=> e <= t.start);
+    if(i<0){ i = ends.length; ends.push(t.end); } else ends[i] = t.end;
+    if(ends[i] < t.end) ends[i] = t.end;
+    lane.set(t, i);
+  });
+  return {lane, count: Math.max(1, ends.length)};
+}
+
 function renderPlanning(){
+  computeTimeline();
   const rows = document.getElementById("tlRows");
   rows.innerHTML = "";
+  const LH = 11;
   DATA.centers.forEach(c=>{
     const pill = centerStatusPill(c);
     const row = document.createElement("div");
     row.className = "tl-row";
+    const {lane, count} = assignLanes(c.tasks);
     let segsHTML = "";
     c.tasks.forEach(t=>{
       if(t.milestone) return;
       const s = parseISO(t.start), e = parseISO(t.end);
       const left = Math.max(0, diffDays(s, TL_START)) / TOTAL_DAYS * 100;
-      const width = Math.max(0.6, diffDays(e,s) / TOTAL_DAYS * 100);
+      const width = Math.max(0.5, diffDays(e,s) / TOTAL_DAYS * 100);
       const color = `var(--${STATUS_COLOR_VAR[t.status]||'amber'})`;
-      segsHTML += `<div class="tl-seg" style="left:${left}%; width:${width}%; background:${color}" title="${t.label}"></div>`;
+      const late = t.status!=="done" && e < TODAY;
+      segsHTML += `<div class="tl-seg${late?" late":""}" style="left:${left}%; width:${width}%; top:${3+lane.get(t)*LH}px; background:${color}" title="${esc(t.label)} — ${STATUS_LABEL[t.status]||""} (${fmtFR(t.start)} → ${fmtFR(t.end)})${late?" — EN RETARD":""}"></div>`;
     });
-    const milestone = c.tasks.find(t=>t.milestone);
-    if(milestone){
-      const left = diffDays(parseISO(milestone.start), TL_START) / TOTAL_DAYS * 100;
-      segsHTML += `<div class="tl-milestone" style="left:${left}%" title="Ouverture — ${fmtFR(milestone.start)}"></div>`;
-    }
+    const pct = d => diffDays(parseISO(d), TL_START) / TOTAL_DAYS * 100;
+    segsHTML += `<div class="tl-kick" style="left:${pct(c.kickoff)}%" title="Lancement — ${fmtFR(c.kickoff)}"></div>`;
+    segsHTML += `<div class="tl-milestone" style="left:${pct(c.ouverture)}%" title="Ouverture — ${fmtFR(c.ouverture)}"></div>`;
     const todayLeft = diffDays(TODAY, TL_START) / TOTAL_DAYS * 100;
     row.innerHTML = `
-      <div class="tl-label">${c.nom}<span class="st">${pill.label} · ouverture ${fmtFR(c.ouverture)}</span></div>
-      <div class="tl-track">${segsHTML}<div class="tl-today" style="left:${todayLeft}%"></div></div>
+      <div class="tl-label">${esc(c.nom)}<span class="st">${pill.label} · lancement ${fmtFR(c.kickoff)} · ouverture ${fmtFR(c.ouverture)}</span></div>
+      <div class="tl-track" style="height:${count*LH+8}px">${segsHTML}${(todayLeft>=0&&todayLeft<=100)?`<div class="tl-today" style="left:${todayLeft}%"></div>`:""}</div>
     `;
     rows.appendChild(row);
   });
-  // months axis
   const monthsEl = document.getElementById("tlMonths");
-  let html = "";
-  let cur = new Date(TL_START.getFullYear(), TL_START.getMonth(), 1);
-  while(cur < TL_END){
-    const left = diffDays(cur, TL_START) / TOTAL_DAYS * 100;
-    html += `<div style="position:relative; flex:none;"><span style="position:absolute; left:0;">${cur.toLocaleDateString("fr-BE",{month:"short",year:"2-digit"})}</span></div>`;
-    cur = new Date(cur.getFullYear(), cur.getMonth()+1, 1);
-  }
   monthsEl.style.position="relative"; monthsEl.style.height="16px";
   monthsEl.innerHTML = "";
-  cur = new Date(TL_START.getFullYear(), TL_START.getMonth(), 1);
+  let cur = new Date(TL_START.getFullYear(), TL_START.getMonth(), 1);
   while(cur < TL_END){
     const left = diffDays(cur, TL_START) / TOTAL_DAYS * 100;
     const span = document.createElement("span");
@@ -547,7 +567,11 @@ function ganttSvgCenter(c){
 }
 
 function ganttSvgGlobal(){
-  const W=1000, L=230, RH=26, TOP=22, n=DATA.centers.length, H=TOP+n*RH+8;
+  computeTimeline();
+  const W=1000, L=230, LH=7, TOP=22;
+  const info = DATA.centers.map(c=>assignLanes(c.tasks));
+  const heights = info.map(x=>Math.max(24, x.count*LH+10));
+  const H = TOP + heights.reduce((a,b)=>a+b,0) + 8;
   const X = d => L + (diffDays(d,TL_START)/TOTAL_DAYS)*(W-L);
   let g = "";
   let m = new Date(TL_START.getFullYear(), TL_START.getMonth(), 1);
@@ -556,15 +580,21 @@ function ganttSvgGlobal(){
     g += `<line x1="${x}" y1="${TOP-4}" x2="${x}" y2="${H-4}" stroke="#D5DBE1" stroke-width="0.6"/><text x="${x+3}" y="${TOP-8}" font-size="9" fill="#5B6B7A">${m.toLocaleDateString("fr-BE",{month:"short",year:"2-digit"})}</text>`;
     m = new Date(m.getFullYear(), m.getMonth()+1, 1);
   }
+  let y = TOP;
   DATA.centers.forEach((c,i)=>{
-    const y = TOP+i*RH;
+    const RH = heights[i];
     if(i%2===0) g += `<rect x="0" y="${y}" width="${W}" height="${RH}" fill="#F4F6F8"/>`;
-    g += `<text x="6" y="${y+16}" font-size="10" font-weight="700" fill="#1A2531">${esc(trunc(c.nom,34))}</text>`;
+    g += `<text x="6" y="${y+15}" font-size="10" font-weight="700" fill="#1A2531">${esc(trunc(c.nom,34))}</text>`;
     c.tasks.forEach(t=>{
+      if(t.milestone) return;
       const xs = X(parseISO(t.start)), xe = X(parseISO(t.end));
-      if(t.milestone) g += `<polygon points="${xs},${y+3} ${xs+8},${y+RH/2} ${xs},${y+RH-3} ${xs-8},${y+RH/2}" fill="#6C3FA8"/>`;
-      else g += `<rect x="${Math.max(L,xs)}" y="${y+6}" width="${Math.max(2,xe-xs)}" height="${RH-12}" fill="${ST_COL[t.status]||"#B4720A"}" opacity="0.92"/>`;
+      const late = t.status!=="done" && parseISO(t.end) < TODAY;
+      g += `<rect x="${Math.max(L,xs)}" y="${y+4+info[i].lane.get(t)*LH}" width="${Math.max(2,xe-xs)}" height="${LH-1.5}" fill="${ST_COL[t.status]||"#B4720A"}" ${late?'stroke="#C6392F" stroke-width="0.8"':""}/>`;
     });
+    const xo = X(parseISO(c.ouverture)), xk = X(parseISO(c.kickoff));
+    g += `<line x1="${xk}" y1="${y+2}" x2="${xk}" y2="${y+RH-2}" stroke="#14414B" stroke-width="1.2"/>`;
+    g += `<polygon points="${xo},${y+3} ${xo+6},${y+RH/2} ${xo},${y+RH-3} ${xo-6},${y+RH/2}" fill="#6C3FA8"/>`;
+    y += RH;
   });
   if(TODAY>=TL_START && TODAY<=TL_END){
     const x = X(TODAY);
@@ -903,6 +933,21 @@ function renderEditor(){
   bind("f-ouverture","ouverture");
   bind("f-urgence","urgence");
   bind("f-adresse","adresse");
+  let prevK = c.kickoff, prevO = c.ouverture;
+  const shiftTasks = ()=>{
+    const nk = c.kickoff, no = c.ouverture;
+    if(!nk || !no || (nk===prevK && no===prevO)) return;
+    if(c.tasks.length && confirm("Les dates de lancement / d'ouverture ont changé.\n\nRecalculer automatiquement les dates des tâches de ce centre (décalage et ajustement proportionnel) ?\nOK = recalculer · Annuler = ne garder que les nouvelles dates du centre")){
+      const oSpan = diffDays(parseISO(prevO), parseISO(prevK)), nSpan = diffDays(parseISO(no), parseISO(nk));
+      const ratio = oSpan>0 && nSpan>0 ? nSpan/oSpan : 1;
+      const map = d => addDays(nk, Math.round(diffDays(parseISO(d), parseISO(prevK))*ratio));
+      c.tasks.forEach(t=>{ t.start = map(t.start); t.end = map(t.end); });
+      renderEditor(); renderKanban();
+    }
+    prevK = nk; prevO = no;
+    markDirty(); renderPlanning(); renderOverview();
+  };
+  ["f-kickoff","f-ouverture"].forEach(id=>document.getElementById(id).addEventListener("change", shiftTasks));
   bind("f-note","note");
 
   // ---- Tasks table ----
@@ -1276,9 +1321,7 @@ document.addEventListener("visibilitychange", ()=>{
 async function init(){
   DATA = await loadData();
   TODAY = new Date(); TODAY.setHours(0,0,0,0);
-  TL_START = parseISO(CONFIG.timelineStart);
-  TL_END = parseISO(CONFIG.timelineEnd);
-  TOTAL_DAYS = diffDays(TL_END, TL_START);
+  computeTimeline();
 
   buildIndexes();
 
