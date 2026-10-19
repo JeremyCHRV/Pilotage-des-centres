@@ -1134,6 +1134,104 @@ function copySoumagne(){
   alert(added + " ligne(s) ajoutée(s) aux autres centres.");
 }
 
+/* ---------------- Documents et photos par centre ---------------- */
+const FILES_URL = "/api/files";
+let activeDocCenterId = null;
+const IMG_EXT = /\.(jpe?g|png|gif|webp|heic)$/i;
+function fileUrl(path, extra){ return FILES_URL + "?p=" + encodeURIComponent(path) + (extra||""); }
+function fmtSize(n){ return n>=1048576 ? (n/1048576).toFixed(1)+" Mo" : Math.max(1,Math.round(n/1024))+" Ko"; }
+function docStatus(msg, bad){ const e=document.getElementById("docStatus"); if(e){ e.textContent = msg||""; e.className = "doc-status"+(bad?" bad":""); } }
+function renderDocCenterTabs(){
+  if(!activeDocCenterId || !DATA.centers.find(c=>c.id===activeDocCenterId)) activeDocCenterId = DATA.centers[0] ? DATA.centers[0].id : null;
+  const wrap = document.getElementById("docCenterTabs"); if(!wrap) return;
+  wrap.innerHTML = "";
+  DATA.centers.forEach(c=>{
+    const n = (c.docs||[]).length;
+    const b = document.createElement("button");
+    b.className = "ctab" + (c.id===activeDocCenterId ? " active":"");
+    b.textContent = c.nom + (n ? " ("+n+")" : "");
+    b.onclick = ()=>{ activeDocCenterId = c.id; renderDocCenterTabs(); renderDocs(); };
+    wrap.appendChild(b);
+  });
+}
+function renderDocs(){
+  renderDocCenterTabs();
+  const c = DATA.centers.find(x=>x.id===activeDocCenterId);
+  if(!c) return;
+  if(!Array.isArray(c.docs)) c.docs = [];
+  document.getElementById("docMeta").innerHTML = `<b>${esc(c.nom)}</b> · ${esc(c.type||"")}${addrHtml(c,false)}`;
+  const photos = c.docs.filter(d=>d.kind==="photo"), files = c.docs.filter(d=>d.kind!=="photo");
+  document.getElementById("docPhotoN").textContent = "("+photos.length+")";
+  document.getElementById("docFileN").textContent = "("+files.length+")";
+  const grid = document.getElementById("photoGrid"); grid.innerHTML = "";
+  if(!photos.length) grid.innerHTML = '<p class="doc-empty">Aucune photo pour ce centre.</p>';
+  photos.forEach(d=>grid.appendChild(docCard(c,d,true)));
+  const list = document.getElementById("docList"); list.innerHTML = "";
+  if(!files.length) list.innerHTML = '<p class="doc-empty">Aucun document pour ce centre.</p>';
+  files.forEach(d=>list.appendChild(docCard(c,d,false)));
+}
+function docCard(c, d, isPhoto){
+  const el = document.createElement("div");
+  el.className = isPhoto ? "photo-card" : "doc-row";
+  const open = fileUrl(d.path);
+  const dl = fileUrl(d.path, "&dl=1&name="+encodeURIComponent(d.name));
+  const meta = `${esc(d.name)} · ${fmtSize(d.size||0)} · ${esc(d.date||"")}`;
+  el.innerHTML = (isPhoto
+    ? `<a href="${esc(open)}" target="_blank" rel="noopener"><img src="${esc(open)}" alt="${esc(d.name)}" loading="lazy"></a>`
+    : `<a class="doc-ico" href="${esc(open)}" target="_blank" rel="noopener">📄</a>`)
+    + `<div class="doc-info"><div class="doc-name">${meta}</div>
+       <input type="text" class="doc-note" placeholder="Légende / commentaire (facultatif)" value="${esc(d.note||"")}">
+       <div class="doc-actions"><a href="${esc(open)}" target="_blank" rel="noopener">Ouvrir ↗</a> <a href="${esc(dl)}">Télécharger</a> <button class="row-del" title="Supprimer">✕ Supprimer</button></div></div>`;
+  el.querySelector(".doc-note").addEventListener("input", e=>{ d.note = e.target.value; markDirty(); });
+  el.querySelector(".row-del").addEventListener("click", async ()=>{
+    if(!confirm("Supprimer « "+d.name+" » ?")) return;
+    try{ await fetch(fileUrl(d.path), {method:"DELETE", headers:{"X-Edit-Password": sessionStorage.getItem(CONFIG.editPasswordKey)||""}}); }catch(e){}
+    c.docs = c.docs.filter(x=>x!==d); markDirty(); renderDocs();
+  });
+  return el;
+}
+async function shrinkImage(file){
+  if(!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
+  try{
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1600/Math.max(bmp.width, bmp.height));
+    const cv = document.createElement("canvas"); cv.width = Math.round(bmp.width*k); cv.height = Math.round(bmp.height*k);
+    cv.getContext("2d").drawImage(bmp,0,0,cv.width,cv.height);
+    const blob = await new Promise(r=>cv.toBlob(r,"image/jpeg",0.82));
+    if(blob && blob.size < file.size) return new File([blob], file.name.replace(/\.\w+$/,"")+".jpg", {type:"image/jpeg"});
+  }catch(e){}
+  return file;
+}
+async function uploadDocs(fileList){
+  const c = DATA.centers.find(x=>x.id===activeDocCenterId); if(!c) return;
+  if(DATA_SOURCE !== "api"){ docStatus("Le stockage partagé n'est pas actif : impossible d'enregistrer des fichiers (voir README, section 6).", true); return; }
+  if(!Array.isArray(c.docs)) c.docs = [];
+  const files = Array.from(fileList); let ok = 0;
+  for(let i=0;i<files.length;i++){
+    let f = files[i];
+    docStatus("Envoi "+(i+1)+"/"+files.length+" : "+f.name+"…");
+    const isPhoto = IMG_EXT.test(f.name) || /^image\//.test(f.type);
+    if(isPhoto) f = await shrinkImage(f);
+    if(f.size > 4.2*1024*1024){ docStatus("« "+f.name+" » dépasse 4 Mo : non envoyé.", true); continue; }
+    try{
+      const res = await fetch(FILES_URL+"?centre="+encodeURIComponent(c.id)+"&name="+encodeURIComponent(f.name), {
+        method:"POST", headers:{"Content-Type":"application/octet-stream","X-Edit-Password": sessionStorage.getItem(CONFIG.editPasswordKey)||""}, body:f });
+      const j = await res.json().catch(()=>({}));
+      if(!res.ok){ docStatus("« "+f.name+" » refusé : "+(j.message||res.status), true); continue; }
+      c.docs.push({ id:genId("d"), name:f.name, kind:isPhoto?"photo":"doc", size:f.size, path:j.path, date:new Date().toLocaleDateString("fr-BE"), note:"" });
+      ok++; markDirty(); renderDocs();
+    }catch(e){ docStatus("Erreur réseau pendant l'envoi de « "+f.name+" ».", true); }
+  }
+  if(ok) docStatus(ok+" fichier"+(ok>1?"s":"")+" ajouté"+(ok>1?"s":"")+".");
+}
+function wireDocs(){
+  const inp = document.getElementById("docFile"), drop = document.getElementById("docDrop");
+  inp.addEventListener("change", ()=>{ uploadDocs(inp.files); inp.value = ""; });
+  ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e=>{ if(e.dataTransfer && e.dataTransfer.files.length) uploadDocs(e.dataTransfer.files); });
+}
+
 function wireEditorButtons(){
   document.getElementById("btnAddCenter").addEventListener("click", ()=>{
     const n = DATA.centers.length + 1;
@@ -1193,7 +1291,7 @@ function wireEditorButtons(){
     e.target.reset(); document.getElementById("af-qty").value = 1; e.target.hidden = true;
     renderOrders(); renderOverview(); renderEditor();
   });
-  wireSort();
+  wireSort(); wireDocs();
   document.getElementById("btnCsvCat").addEventListener("click", exportCatCsv);
   document.getElementById("btnPdfCat").addEventListener("click", exportCatPdf);
   document.getElementById("btnPdfAll").addEventListener("click", ()=>exportReportPdf("all"));
@@ -1262,6 +1360,7 @@ document.querySelectorAll(".tab-btn").forEach(btn=>{
     document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById("view-"+btn.dataset.view).classList.add("active");
+    if(btn.dataset.view==="docs") renderDocs();
   });
 });
 
@@ -1291,7 +1390,7 @@ async function loadData(){
 function renderAll(){
   buildIndexes();
   renderOverview(); renderPlanning(); renderTaskCenterTabs(); renderKanban();
-  renderOrderCenterTabs(); renderOrders(); renderEditCenterTabs(); renderEditor();
+  renderOrderCenterTabs(); renderOrders(); renderEditCenterTabs(); renderEditor(); renderDocs();
 }
 function schedulePush(){
   if(DATA_SOURCE !== "api") return;
@@ -1385,6 +1484,7 @@ async function init(){
   renderOrders();
   renderEditCenterTabs();
   renderEditor();
+  renderDocs();
   wireEditorButtons();
 }
 init();

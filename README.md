@@ -173,3 +173,7 @@ téléchargement de copie est disponible.
 ## Enregistrement automatique et modifications pour tous les centres (v8)
 - Chaque modification dans l'onglet Édition est enregistrée automatiquement (~1 s) et partagée avec l'équipe (si le stockage partagé est actif).
 - Case « Appliquer à tous les centres » : article/tâche modifié, ajouté ou supprimé = répercuté sur tous les centres. Statuts et quantités restent propres à chaque centre. Les dates ne sont répercutées que si la 2e case est cochée.
+
+
+## Documents et photos par centre (v15)
+Onglet « Documents » : dépôt de photos et de fichiers pour chaque centre. Les fichiers sont stockés dans Vercel Blob via `api/files.js` (nouveau fichier à ajouter dans le dossier `api`). Limite : 4 Mo par fichier (les photos sont réduites automatiquement). Nécessite le stockage partagé actif.

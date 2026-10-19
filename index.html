@@ -22,6 +22,7 @@
     <button class="tab-btn" data-view="planning">Planning</button>
     <button class="tab-btn" data-view="tasks">Tâches</button>
     <button class="tab-btn" data-view="orders">Commandes</button>
+    <button class="tab-btn" data-view="docs">Documents</button>
     <button class="tab-btn" data-view="edit">Édition</button>
   </div>
 </div>
@@ -89,6 +90,22 @@
       <thead><tr><th class="sortable" data-sort="poste">Article</th><th class="sortable" data-sort="descriptif">Descriptif</th><th class="sortable" data-sort="reference">Référence</th><th class="sortable" data-sort="fournisseur">Fournisseur</th><th class="sortable" data-sort="url">Lien</th><th class="sortable" data-sort="pu">PU</th><th class="sortable" data-sort="qty">Qté</th><th class="sortable" data-sort="total">Total</th><th class="sortable" data-sort="status">Statut</th></tr></thead>
       <tbody id="orderRows"></tbody>
     </table>
+  </div>
+
+  <div class="view" id="view-docs">
+    <div class="center-tabs" id="docCenterTabs"></div>
+    <div class="center-meta" id="docMeta"></div>
+    <div class="doc-drop" id="docDrop">
+      <b>Déposez ici des photos ou des documents</b> pour ce centre, ou
+      <label class="btn btn-publish" for="docFile" style="margin-left:6px;cursor:pointer;">＋ Choisir des fichiers</label>
+      <input type="file" id="docFile" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv" hidden>
+      <div class="export-hint" style="margin-top:6px;">Photos (réduites automatiquement), PDF, Word, Excel, PowerPoint, texte, CSV · 4 Mo maximum par fichier.</div>
+      <div id="docStatus" class="doc-status"></div>
+    </div>
+    <h3 class="doc-h">Photos <span id="docPhotoN"></span></h3>
+    <div class="photo-grid" id="photoGrid"></div>
+    <h3 class="doc-h">Documents <span id="docFileN"></span></h3>
+    <div id="docList"></div>
   </div>
 
   <div class="view" id="view-edit">
