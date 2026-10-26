@@ -3,7 +3,7 @@
 //   GET    /api/files?p=files/...          (renvoie le fichier)
 //   DELETE /api/files?p=files/...
 // Limite Vercel pour le corps d'une requête : 4,5 Mo (les photos sont réduites par le navigateur avant l'envoi).
-import { put, list, get, del } from "@vercel/blob";
+import { put, get, del } from "@vercel/blob";
 
 const MAX_BYTES = 4.2 * 1024 * 1024;
 const MIME = {
@@ -19,21 +19,30 @@ const safe = (s) => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/
 async function putFile(path, buf, contentType) {
   const opts = { addRandomSuffix: true, contentType };
   try {
-    return await put(path, buf, { ...opts, access: "public" });
+    const r = await put(path, buf, { ...opts, access: "public" });
+    return { r, access: "public" };
   } catch (e) {
-    if (/private/i.test(String((e && e.message) || e))) return await put(path, buf, { ...opts, access: "private" });
+    if (/private/i.test(String((e && e.message) || e))) return { r: await put(path, buf, { ...opts, access: "private" }), access: "private" };
     throw e;
   }
 }
 
+function storeHost() {
+  let id = process.env.BLOB_STORE_ID || "";
+  if (!id && process.env.BLOB_READ_WRITE_TOKEN) id = "store_" + (process.env.BLOB_READ_WRITE_TOKEN.split("_")[3] || "");
+  return id.startsWith("store_") && id.length > 6 ? `https://${id.slice(6).toLowerCase()}.public.blob.vercel-storage.com` : null;
+}
+
+// Lecture sans « list » (opération avancée comptabilisée par Vercel).
 async function readFile(pathname) {
-  const { blobs } = await list({ prefix: pathname, limit: 1 });
-  if (!blobs.length) return null;
-  try {
-    const r = await fetch(blobs[0].url);
-    if (r.ok) return Buffer.from(await r.arrayBuffer());
-  } catch (e) { /* lecture privée ci-dessous */ }
-  const res = await get(blobs[0].pathname, { access: "private", useCache: false });
+  const host = storeHost();
+  if (host) {
+    try {
+      const r = await fetch(`${host}/${pathname}`);
+      if (r.ok) return Buffer.from(await r.arrayBuffer());
+    } catch (e) { /* lecture privée ci-dessous */ }
+  }
+  const res = await get(pathname, { access: "private", useCache: false });
   if (!res) return null;
   return Buffer.from(await new Response(res.stream).arrayBuffer());
 }
@@ -70,8 +79,8 @@ export default async function handler(req, res) {
       const buf = await readBody(req);
       if (!buf.length) return res.status(400).json({ error: "empty", message: "Fichier vide." });
       if (buf.length > MAX_BYTES) return res.status(413).json({ error: "size", message: "Fichier trop volumineux (maximum 4 Mo)." });
-      const r = await putFile(`files/${centre}/${safe(name)}`, buf, MIME[ext]);
-      return res.status(200).json({ ok: true, path: r.pathname, size: buf.length });
+      const { r, access } = await putFile(`files/${centre}/${safe(name)}`, buf, MIME[ext]);
+      return res.status(200).json({ ok: true, path: r.pathname, url: r.url, access, size: buf.length });
     }
 
     const p = url.searchParams.get("p") || "";
@@ -92,8 +101,8 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "DELETE") {
-      const { blobs } = await list({ prefix: p, limit: 1 });
-      if (blobs.length) await del(blobs[0].url);
+      const u = url.searchParams.get("u") || "";
+      await del(/^https:\/\/[a-z0-9-]+\.public\.blob\.vercel-storage\.com\//i.test(u) ? u : p);
       return res.status(200).json({ ok: true });
     }
     return res.status(405).json({ error: "method_not_allowed" });

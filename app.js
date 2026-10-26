@@ -1134,10 +1134,212 @@ function copySoumagne(){
   alert(added + " ligne(s) ajoutée(s) aux autres centres.");
 }
 
+/* ---------------- Demandes de commande (agents → secrétariat / coordinateur) ---------------- */
+const REQ_ST = {recue:"Réceptionnée", en_cours:"En cours", finalisee:"Finalisée", expediee:"Expédiée"};
+const REQ_ST_COL = {recue:"#B4720A", en_cours:"#2262A8", finalisee:"#6C3FA8", expediee:"#1E8A4C"};
+let activeReqId = null;
+function reqs(){ if(!Array.isArray(DATA.requests)) DATA.requests = []; return DATA.requests; }
+function settings(){ if(!DATA.settings || typeof DATA.settings!=="object") DATA.settings = {}; return DATA.settings; }
+function todayISO(){ return toISO(new Date()); }
+function nextReqRef(){
+  const y = new Date().getFullYear();
+  const max = reqs().reduce((m,r)=>{ const x = String(r.ref||"").match(/-(\d+)$/); return x ? Math.max(m,+x[1]) : m; },0);
+  return "DC-"+y+"-"+String(max+1).padStart(3,"0");
+}
+function linkOrText(v){
+  v = (v||"").trim(); if(!v) return "";
+  if(/^https?:\/\//i.test(v) || (/^[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(v))) return `<a href="${esc(safeUrl(v))}" target="_blank" rel="noopener noreferrer" title="${esc(v)}">📍 Ouvrir ↗</a>`;
+  return `<span title="${esc(v)}">📍 ${esc(trunc(v,28))}</span>`;
+}
+function bonLink(){ return (settings().bonLivraisonUrl||"").trim(); }
+function openBon(){
+  let u = bonLink();
+  if(!u){ if(!setBonUrl()) return; u = bonLink(); }
+  window.open(safeUrl(u), "_blank", "noopener");
+}
+function setBonUrl(){
+  const v = prompt("Adresse (URL) de la page qui génère le bon de livraison :", bonLink());
+  if(v===null) return false;
+  settings().bonLivraisonUrl = v.trim(); markDirty(); renderRequests(); return !!v.trim();
+}
+function stampStatus(r, st){
+  r.statut = st; r.dates = r.dates || {};
+  if(!r.dates[st]) r.dates[st] = todayISO();
+}
+function renderRequests(noDetail){
+  const rows = document.getElementById("reqRows"); if(!rows) return;
+  const list = reqs(), filt = document.getElementById("reqFilter").value;
+  const cnt = k => list.filter(r=>r.statut===k).length;
+  document.getElementById("reqSummary").innerHTML = Object.keys(REQ_ST).map(k=>`<div class="stat"><div class="n" style="color:${REQ_ST_COL[k]}">${cnt(k)}</div><div class="l">${REQ_ST[k]}</div></div>`).join("");
+  document.getElementById("bonUrlHint").textContent = bonLink() ? "Bon de livraison : lien enregistré (icône 🧾)." : "Aucun lien de bon de livraison enregistré : cliquez sur ⚙ pour l'indiquer.";
+  rows.innerHTML = "";
+  const shown = list.filter(r=>!filt || r.statut===filt).slice().sort((a,b)=>String(b.ref).localeCompare(String(a.ref)));
+  if(!shown.length){ rows.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#5B6B7A;padding:18px;">Aucune demande — cliquez sur « ＋ Nouvelle demande de commande ».</td></tr>`; }
+  shown.forEach(r=>{
+    const c = DATA.centers.find(x=>x.id===r.centre);
+    const tr = document.createElement("tr");
+    if(r.id===activeReqId) tr.className = "req-active";
+    tr.innerHTML = `
+      <td><b>${esc(r.ref)}</b></td>
+      <td>${r.dateRecue? fmtFR(r.dateRecue):""}</td>
+      <td>${esc(r.agent)}</td>
+      <td>${esc(c? c.nom.replace(/^\d+\.\s*/,"") : "—")}</td>
+      <td>${r.dateSouhaitee? fmtFR(r.dateSouhaitee):""}</td>
+      <td>${linkOrText(r.enlevement)}</td>
+      <td>${(r.items||[]).length}</td>
+      <td><select data-st style="font-weight:700;color:${REQ_ST_COL[r.statut]||"#333"}">${Object.entries(REQ_ST).map(([k,v])=>`<option value="${k}" ${r.statut===k?"selected":""}>${v}</option>`).join("")}</select></td>
+      <td class="req-actions"><button data-a="open" title="Ouvrir / modifier">✎</button><button data-a="print" title="Imprimer le compte rendu">🖨</button><button data-a="bon" class="${(r.statut==="finalisee"||r.statut==="expediee")?"hot":""}" title="Générer le bon de livraison">🧾</button><button data-a="del" title="Supprimer la demande">✕</button></td>`;
+    tr.querySelector("[data-st]").addEventListener("change", e=>{ stampStatus(r, e.target.value); markDirty(); renderRequests(); if(activeReqId===r.id) renderReqDetail(); });
+    tr.querySelectorAll("[data-a]").forEach(b=>b.addEventListener("click", ()=>{
+      const a = b.dataset.a;
+      if(a==="open"){ activeReqId = r.id; renderRequests(); renderReqDetail(); document.getElementById("reqDetail").scrollIntoView({behavior:"smooth"}); }
+      else if(a==="print") printReq(r);
+      else if(a==="bon") openBon();
+      else if(a==="del"){ if(!confirm("Supprimer la demande "+r.ref+" ?")) return; (r.items||[]).forEach(it=>{ if(it.photo) fetch(fileUrl(it.photo, it.photoUrl? "&u="+encodeURIComponent(it.photoUrl):""),{method:"DELETE"}).catch(()=>{}); }); DATA.requests = reqs().filter(x=>x!==r); if(activeReqId===r.id) activeReqId=null; markDirty(); renderRequests(); renderReqDetail(); }
+    }));
+    rows.appendChild(tr);
+  });
+  if(noDetail!==true) renderReqDetail();
+}
+function renderReqDetail(){
+  const box = document.getElementById("reqDetail");
+  const r = reqs().find(x=>x.id===activeReqId);
+  if(!r){ box.innerHTML = ""; return; }
+  if(!Array.isArray(r.items)) r.items = [];
+  const cOpts = `<option value="">— Aucun / général —</option>` + DATA.centers.map(c=>`<option value="${c.id}" ${r.centre===c.id?"selected":""}>${esc(c.nom)}</option>`).join("");
+  const cat = DATA.centers.find(c=>c.id===r.centre);
+  const dl = (cat? cat.orders : DATA.centers.flatMap(c=>c.orders)).map(o=>o.poste).filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>a.localeCompare(b,"fr"));
+  box.innerHTML = `<div class="edit-section req-box">
+    <h3>Demande ${esc(r.ref)} <button class="btn btn-small" id="rdClose">Fermer</button> <button class="btn btn-small" id="rdPrint">🖨 Imprimer le compte rendu</button> <button class="btn btn-small" id="rdBon">🧾 Bon de livraison</button></h3>
+    <div class="edit-grid">
+      <div><label>Agent / demandeur</label><input type="text" id="rd-agent" value="${esc(r.agent)}"></div>
+      <div><label>Centre concerné</label><select id="rd-centre">${cOpts}</select></div>
+      <div><label>Date de réception de la demande</label><input type="date" id="rd-recue" value="${esc(r.dateRecue||"")}"></div>
+      <div><label>Date souhaitée</label><input type="date" id="rd-souhaitee" value="${esc(r.dateSouhaitee||"")}"></div>
+      <div><label>Statut</label><select id="rd-statut">${Object.entries(REQ_ST).map(([k,v])=>`<option value="${k}" ${r.statut===k?"selected":""}>${v}</option>`).join("")}</select></div>
+      <div class="full"><label>Lien d'enlèvement (adresse ou URL du point de retrait)</label><input type="text" id="rd-enl" value="${esc(r.enlevement||"")}" placeholder="https://… ou adresse"></div>
+      <div class="full"><label>Remarques</label><textarea id="rd-note">${esc(r.note||"")}</textarea></div>
+    </div>
+    <h4 style="margin:14px 0 6px;color:var(--navy-2);">Articles commandés</h4>
+    <datalist id="rdCatalog">${dl.map(n=>`<option value="${esc(n)}">`).join("")}</datalist>
+    <div class="req-quick"><input type="text" id="rdQuick" list="rdCatalog" placeholder="Ajout rapide : tapez un article (ou choisissez dans la liste du centre) puis Entrée"> <button class="btn btn-publish btn-small" id="rdAdd">＋ Ajouter</button></div>
+    <table class="edit-table"><thead><tr><th>Photo</th><th>Article</th><th>Référence</th><th>Qté</th><th>Commentaire</th><th></th></tr></thead><tbody id="rdItems"></tbody></table>
+    <div id="rdStatus" class="doc-status"></div>
+  </div>`;
+    const bind = (id,f,fn)=>document.getElementById(id).addEventListener("input", e=>{ r[f] = fn? fn(e.target.value): e.target.value; markDirty(); });
+  bind("rd-agent","agent"); bind("rd-recue","dateRecue"); bind("rd-souhaitee","dateSouhaitee"); bind("rd-enl","enlevement"); bind("rd-note","note");
+  ["rd-agent","rd-recue","rd-souhaitee","rd-enl"].forEach(id=>document.getElementById(id).addEventListener("change", ()=>renderRequests(true)));
+  document.getElementById("rd-centre").addEventListener("change", e=>{ r.centre = e.target.value; markDirty(); renderRequests(true); });
+  document.getElementById("rd-statut").addEventListener("change", e=>{ stampStatus(r, e.target.value); markDirty(); renderRequests(true); });
+  document.getElementById("rdClose").onclick = ()=>{ activeReqId = null; renderRequests(); };
+  document.getElementById("rdPrint").onclick = ()=>printReq(r);
+  document.getElementById("rdBon").onclick = openBon;
+  const quick = document.getElementById("rdQuick");
+  const addItem = ()=>{
+    const name = quick.value.trim(); if(!name) return;
+    const src = (cat? cat.orders : DATA.centers.flatMap(c=>c.orders)).find(o=>o.poste===name);
+    r.items.push({ id:genId("i"), poste:name, reference: src? src.reference||"" : "", qty:1, note:"", photo:"" });
+    quick.value = ""; markDirty(); renderReqDetail(); renderRequests(true);
+    setTimeout(()=>{ const q = document.getElementById("rdQuick"); if(q) q.focus(); }, 0);
+  };
+  quick.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); addItem(); } });
+  document.getElementById("rdAdd").onclick = ()=>{ if(!quick.value.trim()){ quick.focus(); return; } addItem(); };
+  const tb = document.getElementById("rdItems");
+  if(!r.items.length) tb.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#5B6B7A;padding:12px;">Aucun article — utilisez la zone d'ajout rapide ci-dessus.</td></tr>`;
+  r.items.forEach(it=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="req-photo">${it.photo? `<a href="${esc(itemPhotoUrl(it))}" target="_blank" rel="noopener"><img src="${esc(itemPhotoUrl(it))}" alt=""></a><button class="row-del" data-a="rmphoto" title="Retirer la photo">✕</button>` : `<label class="btn btn-small" style="cursor:pointer;">📷<input type="file" accept="image/*" hidden></label>`}</td>
+      <td><input type="text" data-f="poste" list="rdCatalog" value="${esc(it.poste)}" style="min-width:200px;"></td>
+      <td><input type="text" data-f="reference" value="${esc(it.reference)}" style="min-width:100px;"></td>
+      <td><input type="number" data-f="qty" min="0" value="${it.qty}" style="width:70px;"></td>
+      <td><input type="text" data-f="note" value="${esc(it.note)}" style="min-width:180px;"></td>
+      <td><button class="row-del" data-a="del" title="Supprimer l'article">✕</button></td>`;
+    tr.querySelectorAll("[data-f]").forEach(inp=>inp.addEventListener("input", ()=>{
+      const f = inp.dataset.f; it[f] = f==="qty" ? (parseInt(inp.value,10)||0) : inp.value; markDirty();
+    }));
+    tr.querySelectorAll("[data-f]").forEach(inp=>inp.addEventListener("change", ()=>renderRequests(true)));
+    tr.querySelector('[data-a="del"]').onclick = ()=>{
+      if(it.photo) fetch(fileUrl(it.photo, it.photoUrl? "&u="+encodeURIComponent(it.photoUrl):""),{method:"DELETE"}).catch(()=>{});
+      r.items = r.items.filter(x=>x!==it); markDirty(); renderReqDetail(); renderRequests(true);
+    };
+    const rm = tr.querySelector('[data-a="rmphoto"]');
+    if(rm) rm.onclick = ()=>{ fetch(fileUrl(it.photo, it.photoUrl? "&u="+encodeURIComponent(it.photoUrl):""),{method:"DELETE"}).catch(()=>{}); it.photo = ""; it.photoUrl = ""; markDirty(); renderReqDetail(); };
+    const fi = tr.querySelector('input[type=file]');
+    if(fi) fi.addEventListener("change", async ()=>{
+      const st = document.getElementById("rdStatus");
+      if(DATA_SOURCE!=="api"){ st.textContent = "Le stockage partagé n'est pas actif : impossible d'enregistrer des photos."; st.className="doc-status bad"; return; }
+      let f = fi.files[0]; if(!f) return;
+      st.textContent = "Envoi de la photo…"; st.className = "doc-status";
+      f = await shrinkImage(f);
+      if(f.size > 4.2*1024*1024){ st.textContent = "Photo trop lourde (4 Mo maximum)."; st.className="doc-status bad"; return; }
+      try{
+        const res = await fetch(FILES_URL+"?centre=demandes&name="+encodeURIComponent(f.name), {method:"POST", headers:{"Content-Type":"application/octet-stream","X-Edit-Password": sessionStorage.getItem(CONFIG.editPasswordKey)||""}, body:f});
+        const j = await res.json().catch(()=>({}));
+        if(!res.ok){ st.textContent = "Photo refusée : "+(j.message||res.status); st.className="doc-status bad"; return; }
+        it.photo = j.path; it.photoUrl = j.url||""; it.photoAccess = j.access||""; markDirty(); renderReqDetail();
+      }catch(e){ st.textContent = "Erreur réseau pendant l'envoi."; st.className="doc-status bad"; }
+    });
+    tb.appendChild(tr);
+  });
+}
+function itemPhotoUrl(it, abs){
+  if(it.photoAccess==="public" && /^https:\/\//.test(it.photoUrl||"")) return it.photoUrl;
+  return (abs? location.origin : "") + fileUrl(it.photo);
+}
+function printReq(r){
+  const c = DATA.centers.find(x=>x.id===r.centre);
+  const d = s => s ? fmtLong(s) : "—";
+  const dates = r.dates || {};
+  const steps = Object.keys(REQ_ST).map(k=>`<td class="${dates[k]?"ok":""}${r.statut===k?" cur":""}"><b>${REQ_ST[k]}</b><br>${dates[k]? fmtFR(dates[k]) : "—"}</td>`).join("");
+  const items = (r.items||[]).map((it,i)=>`<tr><td class="n">${i+1}</td><td class="ph">${it.photo? `<img src="${itemPhotoUrl(it,true)}" alt="">`:""}</td><td>${esc(it.poste)}</td><td>${esc(it.reference)}</td><td class="q">${it.qty}</td><td>${esc(it.note)}</td><td class="chk">☐</td></tr>`).join("");
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Compte rendu ${esc(r.ref)}</title><style>
+  @page{size:A4 portrait;margin:14mm;} body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#1B2A36;margin:0;}
+  h1{font-size:19px;margin:0;color:#14414B;} .sub{color:#5B6B7A;margin:2px 0 12px;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;margin-bottom:12px;} .grid div{border-bottom:1px solid #E1E8EC;padding:3px 0;} .grid b{color:#14414B;}
+  table{width:100%;border-collapse:collapse;margin-bottom:10px;} th{background:#E3EEF0;text-align:left;padding:5px 6px;border-bottom:1px solid #9DBFC4;} td{padding:5px 6px;border-bottom:1px solid #E1E8EC;vertical-align:middle;}
+  tr{page-break-inside:avoid;} .n,.q,.chk{text-align:center;width:34px;} .ph{width:70px;} .ph img{width:62px;height:48px;object-fit:cover;border-radius:3px;display:block;}
+  .steps td{text-align:center;border:1px solid #D5DBE1;padding:6px;color:#8A97A3;} .steps td.ok{color:#1B2A36;background:#F4F8F9;} .steps td.cur{background:#14414B;color:#fff;}
+  .sign{display:flex;gap:24px;margin-top:26px;} .sign div{flex:1;border-top:1px solid #1B2A36;padding-top:4px;color:#5B6B7A;}
+  </style></head><body>
+  <h1>Compte rendu de commande — ${esc(r.ref)}</h1><div class="sub">CHR Verviers · Laboratoire · édité le ${new Date().toLocaleDateString("fr-BE")}</div>
+  <div class="grid">
+    <div><b>Agent / demandeur :</b> ${esc(r.agent||"—")}</div><div><b>Centre :</b> ${esc(c? c.nom : "—")}</div>
+    <div><b>Demande reçue le :</b> ${d(r.dateRecue)}</div><div><b>Date souhaitée :</b> ${d(r.dateSouhaitee)}</div>
+    <div><b>Adresse du centre :</b> ${esc((c&&c.adresse)||"—")}</div><div><b>Enlèvement :</b> ${esc(r.enlevement||"—")}</div>
+  </div>
+  <table class="steps"><tr>${steps}</tr></table>
+  <table><thead><tr><th class="n">#</th><th class="ph">Photo</th><th>Article</th><th>Référence</th><th class="q">Qté</th><th>Commentaire</th><th class="chk">Prêt</th></tr></thead><tbody>${items || '<tr><td colspan="7">Aucun article.</td></tr>'}</tbody></table>
+  ${r.note? `<div><b>Remarques :</b> ${esc(r.note)}</div>`:""}
+  <div class="sign"><div>Préparé par (secrétariat / coordinateur)</div><div>Date</div><div>Réceptionné par</div></div>
+  </body></html>`;
+  const old = document.getElementById("reportFrame"); if(old) old.remove();
+  const fr = document.createElement("iframe");
+  fr.id = "reportFrame"; fr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+  document.body.appendChild(fr);
+  const doc = fr.contentWindow.document; doc.open(); doc.write(html); doc.close();
+  const imgs = Array.from(doc.images);
+  const ready = Promise.all(imgs.map(im=>im.complete ? 1 : new Promise(res=>{ im.onload = im.onerror = res; })));
+  Promise.race([ready, new Promise(res=>setTimeout(res,4000))]).then(()=>{ if(fr.contentWindow){ fr.contentWindow.focus(); fr.contentWindow.print(); } });
+}
+function wireRequests(){
+  document.getElementById("btnNewReq").addEventListener("click", ()=>{
+    const r = { id:genId("r"), ref:nextReqRef(), agent:"", centre:"", dateRecue:todayISO(), dateSouhaitee:"", enlevement:"", statut:"recue", dates:{recue:todayISO()}, note:"", items:[] };
+    reqs().push(r); activeReqId = r.id; markDirty(); renderRequests();
+    setTimeout(()=>{ const a = document.getElementById("rd-agent"); if(a){ a.focus(); a.scrollIntoView({behavior:"smooth",block:"center"}); } }, 50);
+  });
+  document.getElementById("reqFilter").addEventListener("change", renderRequests);
+  document.getElementById("btnBonUrl").addEventListener("click", setBonUrl);
+}
+
 /* ---------------- Documents et photos par centre ---------------- */
 const FILES_URL = "/api/files";
 let activeDocCenterId = null;
 const IMG_EXT = /\.(jpe?g|png|gif|webp|heic)$/i;
+function docUrl(d, dl){
+  if(d && d.access==="public" && /^https:\/\//.test(d.url||"")) return d.url + (dl ? "?download=1" : "");
+  return fileUrl(d.path || d.photo, dl ? "&dl=1&name="+encodeURIComponent(d.name||"fichier") : "");
+}
 function fileUrl(path, extra){ return FILES_URL + "?p=" + encodeURIComponent(path) + (extra||""); }
 function fmtSize(n){ return n>=1048576 ? (n/1048576).toFixed(1)+" Mo" : Math.max(1,Math.round(n/1024))+" Ko"; }
 function docStatus(msg, bad){ const e=document.getElementById("docStatus"); if(e){ e.textContent = msg||""; e.className = "doc-status"+(bad?" bad":""); } }
@@ -1173,8 +1375,7 @@ function renderDocs(){
 function docCard(c, d, isPhoto){
   const el = document.createElement("div");
   el.className = isPhoto ? "photo-card" : "doc-row";
-  const open = fileUrl(d.path);
-  const dl = fileUrl(d.path, "&dl=1&name="+encodeURIComponent(d.name));
+  const open = docUrl(d), dl = docUrl(d, true);
   const meta = `${esc(d.name)} · ${fmtSize(d.size||0)} · ${esc(d.date||"")}`;
   el.innerHTML = (isPhoto
     ? `<a href="${esc(open)}" target="_blank" rel="noopener"><img src="${esc(open)}" alt="${esc(d.name)}" loading="lazy"></a>`
@@ -1185,7 +1386,7 @@ function docCard(c, d, isPhoto){
   el.querySelector(".doc-note").addEventListener("input", e=>{ d.note = e.target.value; markDirty(); });
   el.querySelector(".row-del").addEventListener("click", async ()=>{
     if(!confirm("Supprimer « "+d.name+" » ?")) return;
-    try{ await fetch(fileUrl(d.path), {method:"DELETE", headers:{"X-Edit-Password": sessionStorage.getItem(CONFIG.editPasswordKey)||""}}); }catch(e){}
+    try{ await fetch(fileUrl(d.path, d.url? "&u="+encodeURIComponent(d.url) : ""), {method:"DELETE", headers:{"X-Edit-Password": sessionStorage.getItem(CONFIG.editPasswordKey)||""}}); }catch(e){}
     c.docs = c.docs.filter(x=>x!==d); markDirty(); renderDocs();
   });
   return el;
@@ -1218,7 +1419,7 @@ async function uploadDocs(fileList){
         method:"POST", headers:{"Content-Type":"application/octet-stream","X-Edit-Password": sessionStorage.getItem(CONFIG.editPasswordKey)||""}, body:f });
       const j = await res.json().catch(()=>({}));
       if(!res.ok){ docStatus("« "+f.name+" » refusé : "+(j.message||res.status), true); continue; }
-      c.docs.push({ id:genId("d"), name:f.name, kind:isPhoto?"photo":"doc", size:f.size, path:j.path, date:new Date().toLocaleDateString("fr-BE"), note:"" });
+      c.docs.push({ id:genId("d"), name:f.name, kind:isPhoto?"photo":"doc", size:f.size, path:j.path, url:j.url||"", access:j.access||"", date:new Date().toLocaleDateString("fr-BE"), note:"" });
       ok++; markDirty(); renderDocs();
     }catch(e){ docStatus("Erreur réseau pendant l'envoi de « "+f.name+" ».", true); }
   }
@@ -1291,7 +1492,7 @@ function wireEditorButtons(){
     e.target.reset(); document.getElementById("af-qty").value = 1; e.target.hidden = true;
     renderOrders(); renderOverview(); renderEditor();
   });
-  wireSort(); wireDocs();
+  wireSort(); wireDocs(); wireRequests();
   document.getElementById("btnCsvCat").addEventListener("click", exportCatCsv);
   document.getElementById("btnPdfCat").addEventListener("click", exportCatPdf);
   document.getElementById("btnPdfAll").addEventListener("click", ()=>exportReportPdf("all"));
@@ -1361,6 +1562,7 @@ document.querySelectorAll(".tab-btn").forEach(btn=>{
     btn.classList.add("active");
     document.getElementById("view-"+btn.dataset.view).classList.add("active");
     if(btn.dataset.view==="docs") renderDocs();
+    if(btn.dataset.view==="requests") renderRequests();
   });
 });
 
@@ -1390,12 +1592,12 @@ async function loadData(){
 function renderAll(){
   buildIndexes();
   renderOverview(); renderPlanning(); renderTaskCenterTabs(); renderKanban();
-  renderOrderCenterTabs(); renderOrders(); renderEditCenterTabs(); renderEditor(); renderDocs();
+  renderOrderCenterTabs(); renderOrders(); renderEditCenterTabs(); renderEditor(); renderDocs(); renderRequests();
 }
 function schedulePush(){
   if(DATA_SOURCE !== "api") return;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(pushSilently, 900);
+  pushTimer = setTimeout(pushSilently, 3000);
 }
 function nowHM(){ return new Date().toLocaleTimeString("fr-BE",{hour:"2-digit",minute:"2-digit"}); }
 async function pushSilently(keep){
@@ -1434,10 +1636,13 @@ async function pushSilently(keep){
   if(seq !== editSeq && isDirty) schedulePush();
 }
 function editorHasFocus(){
-  const a = document.activeElement, v = document.getElementById("view-edit");
-  return !!(a && v && v.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+  const a = document.activeElement;
+  return !!(a && ["view-edit","view-requests","view-docs"].some(id=>{ const v=document.getElementById(id); return v && v.contains(a); }) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
 }
+let lastPoll = 0;
 async function pollRemote(){
+  if(Date.now() - lastPoll < 60000) return;
+  lastPoll = Date.now();
   if(DATA_SOURCE !== "api" || isDirty || pushTimer || pushing || editorHasFocus()) return;
   try{
     const res = await fetch(CONFIG.apiUrl + "?t=" + Date.now(), {cache:"no-store"});
@@ -1449,7 +1654,7 @@ async function pollRemote(){
     if(el) el.textContent = "↻ Mis à jour " + nowHM();
   }catch(e){ /* réseau indisponible : on réessaiera */ }
 }
-setInterval(pollRemote, 30000);
+setInterval(()=>{ if(!document.hidden) pollRemote(); }, 300000);   // 5 min : limite la consommation du quota Vercel Blob
 document.addEventListener("visibilitychange", ()=>{
   if(document.hidden){ if(pushTimer || isDirty) pushSilently(true); }
   else pollRemote();
@@ -1485,6 +1690,7 @@ async function init(){
   renderEditCenterTabs();
   renderEditor();
   renderDocs();
+  renderRequests();
   wireEditorButtons();
 }
 init();

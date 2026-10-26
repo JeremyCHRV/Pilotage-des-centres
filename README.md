@@ -177,3 +177,7 @@ téléchargement de copie est disponible.
 
 ## Documents et photos par centre (v15)
 Onglet « Documents » : dépôt de photos et de fichiers pour chaque centre. Les fichiers sont stockés dans Vercel Blob via `api/files.js` (nouveau fichier à ajouter dans le dossier `api`). Limite : 4 Mo par fichier (les photos sont réduites automatiquement). Nécessite le stockage partagé actif.
+
+## Limiter la consommation du quota Vercel Blob (v17)
+- Lecture des données sans appel « list » (opération avancée limitée à 2 000/mois sur le plan gratuit), contrôle des mises à jour toutes les 5 minutes seulement (et au retour sur l'onglet), enregistrement automatique regroupé après 3 s d'inactivité.
+- Les photos s'affichent directement depuis l'adresse publique du stockage.

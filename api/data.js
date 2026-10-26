@@ -17,14 +17,30 @@ async function putJson(body) {
   }
 }
 
-async function readJson(blob) {
+// Adresse publique du stockage, déduite de l'identifiant (évite l'appel « list », comptabilisé comme opération avancée).
+function storeHost() {
+  let id = process.env.BLOB_STORE_ID || "";
+  if (!id && process.env.BLOB_READ_WRITE_TOKEN) id = "store_" + (process.env.BLOB_READ_WRITE_TOKEN.split("_")[3] || "");
+  return id.startsWith("store_") && id.length > 6 ? `https://${id.slice(6).toLowerCase()}.public.blob.vercel-storage.com` : null;
+}
+
+// Lecture sans « list » : 1 seule requête simple quand le stockage est public.
+async function readData() {
+  const host = storeHost();
+  if (host) {
+    try {
+      const r = await fetch(`${host}/${BLOB_PATHNAME}?t=${Date.now()}`, { cache: "no-store" });
+      if (r.ok) return await r.json();
+    } catch (e) { /* essai suivant */ }
+  }
   try {
-    const r = await fetch(blob.url + "?t=" + Date.now(), { cache: "no-store" });
-    if (r.ok) return await r.json();
-  } catch (e) { /* on tente la lecture privée ci-dessous */ }
-  const res = await get(blob.pathname, { access: "private", useCache: false });
-  if (!res) throw new Error("blob introuvable");
-  return JSON.parse(await new Response(res.stream).text());
+    const res = await get(BLOB_PATHNAME, { access: "private", useCache: false });
+    if (res) return JSON.parse(await new Response(res.stream).text());
+  } catch (e) { /* essai suivant */ }
+  const { blobs } = await list({ prefix: BLOB_PATHNAME, limit: 1 });   // dernier recours (stockage vide)
+  if (!blobs.length) return null;
+  const r = await fetch(blobs[0].url + "?t=" + Date.now(), { cache: "no-store" });
+  return r.ok ? await r.json() : null;
 }
 
 export default async function handler(req, res) {
@@ -39,15 +55,15 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     if (!hasBlob) return res.status(404).json({ error: "no_blob" });
     try {
-      const { blobs } = await list({ prefix: BLOB_PATHNAME, limit: 1 });
-      if (!blobs.length) {
+      const data = await readData();
+      if (!data) {
         // Blob configuré mais encore vide : on sert les données de départ (data.json statique)
         const proto = req.headers["x-forwarded-proto"] || "https";
         const seed = await fetch(`${proto}://${req.headers.host}/data.json`, { cache: "no-store" });
         if (!seed.ok) throw new Error("seed fetch failed: " + seed.status);
         return res.status(200).json(await seed.json());
       }
-      return res.status(200).json(await readJson(blobs[0]));
+      return res.status(200).json(data);
     } catch (e) {
       console.error("GET /api/data error", e);
       return res.status(404).json({ error: "blob_unavailable", detail: String((e && e.message) || e) });

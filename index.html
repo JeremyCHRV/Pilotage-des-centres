@@ -22,6 +22,7 @@
     <button class="tab-btn" data-view="planning">Planning</button>
     <button class="tab-btn" data-view="tasks">Tâches</button>
     <button class="tab-btn" data-view="orders">Commandes</button>
+    <button class="tab-btn" data-view="requests">Demandes</button>
     <button class="tab-btn" data-view="docs">Documents</button>
     <button class="tab-btn" data-view="edit">Édition</button>
   </div>
@@ -90,6 +91,22 @@
       <thead><tr><th class="sortable" data-sort="poste">Article</th><th class="sortable" data-sort="descriptif">Descriptif</th><th class="sortable" data-sort="reference">Référence</th><th class="sortable" data-sort="fournisseur">Fournisseur</th><th class="sortable" data-sort="url">Lien</th><th class="sortable" data-sort="pu">PU</th><th class="sortable" data-sort="qty">Qté</th><th class="sortable" data-sort="total">Total</th><th class="sortable" data-sort="status">Statut</th></tr></thead>
       <tbody id="orderRows"></tbody>
     </table>
+  </div>
+
+  <div class="view" id="view-requests">
+    <div class="banner"><span class="dot" style="background:var(--teal)"></span> <span><b>Gestion des commandes passées par les agents</b> — suivi par le secrétariat et le coordinateur : date souhaitée, lien d'enlèvement, statut, compte rendu imprimable et bon de livraison.</span></div>
+    <div class="export-bar">
+      <button class="btn btn-publish" id="btnNewReq">＋ Nouvelle demande de commande</button>
+      <label class="ex-scope">Afficher : <select id="reqFilter"><option value="">Toutes</option><option value="recue">Réceptionnées</option><option value="en_cours">En cours</option><option value="finalisee">Finalisées</option><option value="expediee">Expédiées</option></select></label>
+      <button class="btn" id="btnBonUrl" title="Adresse de la page qui génère le bon de livraison">⚙ Lien du bon de livraison</button>
+      <span class="export-hint" id="bonUrlHint"></span>
+    </div>
+    <div class="order-summary" id="reqSummary"></div>
+    <table class="orders" id="reqTable">
+      <thead><tr><th>N°</th><th>Reçue le</th><th>Agent / demandeur</th><th>Centre</th><th>Date souhaitée</th><th>Enlèvement</th><th>Articles</th><th>Statut</th><th>Actions</th></tr></thead>
+      <tbody id="reqRows"></tbody>
+    </table>
+    <div id="reqDetail"></div>
   </div>
 
   <div class="view" id="view-docs">

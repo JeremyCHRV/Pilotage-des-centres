@@ -251,3 +251,9 @@ th.sorted{color:#14414B;}
 .doc-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;} .doc-actions a{color:var(--blue);text-decoration:none;}
 .doc-row{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;}
 .doc-row .doc-info{padding:0;} .doc-ico{font-size:26px;text-decoration:none;}
+
+.req-actions{white-space:nowrap;} .req-actions button{border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 7px;margin-right:3px;cursor:pointer;font-size:14px;}
+.req-actions button:hover{background:#E3EEF0;} .req-actions button.hot{background:#F0E7F9;border-color:#6C3FA8;}
+tr.req-active td{background:#EAF4F4;} .req-box{margin-top:18px;} .req-quick{display:flex;gap:8px;margin-bottom:8px;} .req-quick input{flex:1;padding:7px 9px;border:1px solid var(--line);border-radius:6px;}
+.req-photo{width:76px;} .req-photo img{width:64px;height:48px;object-fit:cover;border-radius:4px;display:block;}
+#reqTable select{border:1px solid var(--line);border-radius:6px;padding:3px 5px;background:#fff;}
