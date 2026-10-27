@@ -840,9 +840,25 @@ function markDirty(){
   if(DATA_SOURCE === "api"){
     if(banner) banner.textContent = "⏳ Enregistrement automatique en cours…";
     schedulePush();
-  }else if(banner){
-    banner.textContent = "⚠ Stockage partagé non actif : les modifications ne sont pas enregistrées. Téléchargez une copie (JSON) ou voir README, section 6.";
+  }else{
+    // Mode local (stockage partagé indisponible) : copie dans ce navigateur, pour pouvoir continuer à travailler
+    const ok = saveLocalData();
+    if(ok) isDirty = false;
+    if(banner) banner.textContent = ok
+      ? "💾 Mode local : enregistré dans CE navigateur uniquement (non partagé avec l'équipe). Pensez à « Télécharger une copie (JSON) » régulièrement."
+      : "⚠ Impossible d'enregistrer dans ce navigateur. Téléchargez une copie (JSON).";
   }
+}
+const LOCAL_DATA_KEY = "pilotage-chrv-localdata-v1";
+function saveLocalData(){
+  try{ localStorage.setItem(LOCAL_DATA_KEY, JSON.stringify(DATA)); return true; }catch(e){ return false; }
+}
+function loadLocalData(){
+  try{
+    const raw = localStorage.getItem(LOCAL_DATA_KEY); if(!raw) return null;
+    const j = JSON.parse(raw);
+    return j && Array.isArray(j.centers) && j.centers.length ? j : null;
+  }catch(e){ return null; }
 }
 
 /* ---- Propagation des modifications vers tous les centres ---- */
@@ -1507,6 +1523,20 @@ function wireEditorButtons(){
   loadPropPrefs();
   ["chkPropAll","chkPropDates"].forEach(id=>document.getElementById(id).addEventListener("change", savePropPrefs));
   document.getElementById("btnDownload").addEventListener("click", downloadDataBackup);
+  const jf = document.getElementById("importJsonFile");
+  document.getElementById("btnImportJson").addEventListener("click", ()=>jf.click());
+  jf.addEventListener("change", async ()=>{
+    const f = jf.files[0]; jf.value = ""; if(!f) return;
+    try{
+      const j = JSON.parse(await f.text());
+      if(!j || !Array.isArray(j.centers) || !j.centers.length) throw new Error("fichier invalide : aucune liste de centres");
+      const n = j.centers.length, o = j.centers.reduce((s,c)=>s+(c.orders||[]).length,0), t = j.centers.reduce((s,c)=>s+(c.tasks||[]).length,0);
+      if(!confirm("Remplacer TOUTES les données actuelles par cette copie ?\n\n"+n+" centres · "+t+" tâches · "+o+" articles"+((j.requests||[]).length? " · "+j.requests.length+" demandes":"")+"\n\nCette action écrase les données affichées (et partagées avec l'équipe).")) return;
+      DATA = j; buildIndexes(); activeEditCenterId = null; activeOrderCenterId = null; activeTaskCenterId = null; activeDocCenterId = null;
+      renderAll(); renderTaskCenterTabs(); renderOrderCenterTabs(); renderPlanning(); renderOverview();
+      markDirty(); alert("Copie importée. Elle est enregistrée automatiquement pour toute l'équipe.");
+    }catch(e){ alert("Import impossible : "+e.message); }
+  });
 }
 
 async function publishData(){
@@ -1566,13 +1596,15 @@ document.querySelectorAll(".tab-btn").forEach(btn=>{
   });
 });
 
-let DATA_SOURCE = "static", LAST_JSON = "", pushTimer = null;
+let DATA_SOURCE = "static", LAST_JSON = "", pushTimer = null, LOCAL_MODE = false;
 async function loadData(){
   try{
     const res = await fetch(CONFIG.apiUrl, {cache:"no-store"});
     if(res.ok){ DATA_SOURCE = "api"; const j = await res.json(); LAST_JSON = JSON.stringify(j); return j; }
   }catch(e){ /* API route unavailable (e.g. plain static hosting) — fall back below */ }
   try{
+    const local = loadLocalData();          // copie de travail locale (mode hors stockage partagé)
+    if(local){ LOCAL_MODE = true; return local; }
     const res = await fetch(CONFIG.dataUrl, {cache:"no-store"});
     if(!res.ok) throw new Error("HTTP "+res.status);
     return await res.json();
@@ -1675,7 +1707,7 @@ async function init(){
     const shared = DATA_SOURCE === "api" || !!(window.storage && window.storage.get);
     modeLabel.textContent = shared
       ? "Données partagées avec l'équipe projet (statuts visibles et modifiables par tous)."
-      : "⚠ Stockage local à ce navigateur (les statuts modifiés ici ne sont pas visibles par les autres — voir README.md, section 5).";
+      : (LOCAL_MODE ? "💾 Mode local : vos données de travail sont enregistrées dans ce navigateur uniquement (stockage partagé indisponible)." : "⚠ Stockage local à ce navigateur (les statuts modifiés ici ne sont pas visibles par les autres — voir README.md, section 5).");
   }
 
   state = await loadState();

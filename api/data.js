@@ -37,10 +37,12 @@ async function readData() {
     const res = await get(BLOB_PATHNAME, { access: "private", useCache: false });
     if (res) return JSON.parse(await new Response(res.stream).text());
   } catch (e) { /* essai suivant */ }
-  const { blobs } = await list({ prefix: BLOB_PATHNAME, limit: 1 });   // dernier recours (stockage vide)
+  const { blobs } = await list({ prefix: BLOB_PATHNAME, limit: 1 });   // dernier recours (stockage vide ?)
   if (!blobs.length) return null;
   const r = await fetch(blobs[0].url + "?t=" + Date.now(), { cache: "no-store" });
-  return r.ok ? await r.json() : null;
+  // Le fichier existe mais n'est pas lisible : on signale une erreur (surtout pas « vide »), pour ne jamais remplacer de vraies données par les données de départ.
+  if (!r.ok) throw new Error("fichier de données présent mais illisible (HTTP " + r.status + ")");
+  return await r.json();
 }
 
 export default async function handler(req, res) {
